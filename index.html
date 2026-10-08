@@ -400,6 +400,40 @@ textarea{font-family:var(--f-body);line-height:1.5;resize:vertical}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + var(--nav-h) + env(safe-area-inset-bottom,0px));z-index:60;background:var(--ink);color:var(--bg);padding:10px 12px 10px 16px;border-radius:10px;display:flex;align-items:center;gap:12px;font-size:14px;max-width:calc(100% - 32px);box-shadow:0 10px 30px rgb(0 0 0 / .25)}
 .toast .btn{color:var(--bg);border-color:transparent;background:color-mix(in srgb,var(--bg) 16%,transparent)}
 
+/* ---------- cuenta e inicio de sesión ---------- */
+body[data-auth="out"],body[data-auth="loading"]{--nav-h:0px}
+body[data-auth="out"] .tabs,body[data-auth="out"] .top .new,body[data-auth="out"] .bottomnav,
+body[data-auth="loading"] .tabs,body[data-auth="loading"] .top .new,body[data-auth="loading"] .bottomnav{display:none}
+@media (max-width:979px){body[data-auth="out"] .top-in,body[data-auth="loading"] .top-in{grid-template-areas:"brand brand";padding-bottom:10px}}
+.auth{display:grid;justify-items:center;padding-block:clamp(8px,5vh,48px) 24px}
+.auth-card{width:100%;max-width:440px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:clamp(18px,5vw,28px);display:grid;gap:16px}
+.auth-head{display:grid;gap:8px}
+.auth-head h2{font-family:var(--f-display);font-weight:800;font-size:clamp(24px,6vw,30px);letter-spacing:-.02em;line-height:1.1}
+.auth-head p{color:var(--muted);font-size:14.5px}
+.btn.wide{width:100%;min-height:46px;font-size:15px}
+.or{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:13px}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.auth-info{color:var(--ok);font-size:14px;font-weight:600}
+.auth-info:empty{display:none}
+.auth-links{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;font-size:14px}
+.auth .form{gap:12px}
+.auth button:disabled{opacity:.6;cursor:progress}
+code{font-family:var(--f-num);font-size:.92em;background:var(--surface-2);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+.panel-head p + p{margin-top:8px}
+.sync{display:inline-flex;align-items:center;gap:6px;margin-left:6px;padding:3px 9px;border-radius:999px;font-family:var(--f-body);font-size:12px;font-weight:600;letter-spacing:0;background:var(--surface-2);color:var(--muted)}
+.sync i{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.sync.ok{background:var(--ok-soft);color:var(--ok)}
+.sync.warn{background:var(--warn-soft);color:var(--warn)}
+.sync.bad{background:var(--bad-soft);color:var(--bad)}
+.sync.busy i{animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.sync.busy i{animation:none}}
+@media (max-width:640px){.brand .sync{margin-left:auto}}
+@media (max-width:400px){.brand .sync span{display:none}.brand .sync{padding:6px}}
+.sync-line{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted)}
+.sync-line .sync{margin:0;padding:4px}
+.sync-line .sync span{display:none}
+
 /* ---------- pantallas táctiles: botones más fáciles de tocar ---------- */
 @media (pointer:coarse){
   .btn{min-height:44px}
@@ -430,6 +464,7 @@ textarea{font-family:var(--f-body);line-height:1.5;resize:vertical}
     <div class="brand">
       <svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true"><rect x="1" y="1" width="26" height="18" rx="3.5" fill="var(--accent)"/><rect x="5" y="12" width="4" height="3" rx="1" fill="var(--accent-ink)"/><rect x="11" y="12" width="4" height="3" rx="1" fill="var(--accent-ink)" opacity=".7"/><rect x="17" y="12" width="4" height="3" rx="1" fill="var(--accent-ink)" opacity=".4"/></svg>
       <span>Cuotas Compartidas</span>
+      <span id="sync" class="sync" hidden></span>
     </div>
     <nav class="tabs" aria-label="Secciones">
       <button type="button" data-view="mes">Mes</button>
@@ -467,6 +502,8 @@ textarea{font-family:var(--f-body);line-height:1.5;resize:vertical}
 <div id="overlay" class="overlay" hidden></div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+<!-- Configuración de Firebase (opcional). Si este archivo no existe, la página guarda todo en el navegador. -->
+<script src="firebase-config.js"></script>
 <script>
 (() => {
 'use strict';
@@ -506,9 +543,216 @@ const plural = (n, a, b) => n === 1 ? a : b;
 /* ================= state & storage ================= */
 const S = {people: {}, cards: {}, purchases: {}, payments: {}};
 const COLS = Object.keys(S);
+// backend: 'loading' | 'local' (solo este navegador) | 'cloud' (Firebase, con sesión) | 'signedout' | 'error'
 let backend = 'loading';
 const readOnly = false;
 let storageOk = true;
+
+/* ---------- Firebase ---------- */
+const SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
+const FB = {A: null, F: null, app: null, auth: null, db: null, user: null, unsubs: [], ready: new Set(), server: new Set(), pending: new Set(), timer: null, cfg: null, loadErr: null};
+const authUI = {mode: 'login', email: ''};
+let cloudErr = '';
+let online = navigator.onLine !== false;
+const cloud = () => backend === 'cloud' && !!(FB.db && FB.user);
+function fbConfig() {
+  const c = window.FIREBASE_CONFIG;
+  if (!c || typeof c !== 'object') return null;
+  const ok = ['apiKey', 'authDomain', 'projectId', 'appId'].every(k => typeof c[k] === 'string' && c[k].trim() && !/PEGA_AQUI/i.test(c[k]));
+  return ok ? c : null;
+}
+const userRef = (col, id) => FB.F.doc(FB.db, 'users', FB.user.uid, col, id);
+
+async function initFirebase(cfg) {
+  FB.cfg = cfg;
+  try {
+    const [appM, authM, fsM] = await Promise.all([import(SDK + 'firebase-app.js'), import(SDK + 'firebase-auth.js'), import(SDK + 'firebase-firestore.js')]);
+    FB.A = authM; FB.F = fsM;
+    FB.app = appM.initializeApp(cfg);
+    try { FB.db = fsM.initializeFirestore(FB.app, {localCache: fsM.persistentLocalCache({tabManager: fsM.persistentMultipleTabManager()})}); }
+    catch (e) { FB.db = fsM.getFirestore(FB.app); }
+    FB.auth = authM.getAuth(FB.app);
+    try { authM.useDeviceLanguage(FB.auth); } catch (e) {}
+    authM.onAuthStateChanged(FB.auth, user => {
+      unsubscribeAll();
+      COLS.forEach(c => { S[c] = {}; });
+      cloudErr = '';
+      FB.user = user || null;
+      backend = user ? 'cloud' : 'signedout';
+      document.body.dataset.auth = user ? 'in' : 'out';
+      if (user) subscribe(user.uid);
+      render();
+    });
+  } catch (e) {
+    FB.loadErr = e;
+    backend = 'error';
+    document.body.dataset.auth = 'out';
+    render();
+  }
+}
+function unsubscribeAll() {
+  FB.unsubs.forEach(u => { try { u(); } catch (e) {} });
+  FB.unsubs = [];
+  clearTimeout(FB.timer);
+  FB.ready = new Set(); FB.server = new Set(); FB.pending = new Set();
+}
+function subscribe(uid) {
+  const F = FB.F;
+  COLS.forEach(c => {
+    try {
+      const un = F.onSnapshot(F.collection(FB.db, 'users', uid, c), {includeMetadataChanges: true}, snap => {
+        const o = {};
+        snap.docs.forEach(d => { const v = d.data(); if (v) o[d.id] = Object.assign({}, v, {id: d.id}); });
+        S[c] = o;
+        if (!snap.metadata.fromCache) FB.server.add(c);
+        if (!snap.metadata.fromCache || snap.size > 0 || !online) FB.ready.add(c);
+        if (snap.metadata.hasPendingWrites) FB.pending.add(c); else FB.pending.delete(c);
+        if (cloudErr && !snap.metadata.fromCache) cloudErr = '';
+        scheduleRender();
+      }, err => { FB.ready.add(c); onCloudError(err, true); });
+      FB.unsubs.push(un);
+    } catch (e) { FB.ready.add(c); onCloudError(e, true); }
+  });
+  // Si no hay internet, no esperamos más de 4 s para mostrar lo que haya guardado en el dispositivo
+  FB.timer = setTimeout(() => { COLS.forEach(c => FB.ready.add(c)); scheduleRender(); }, 4000);
+}
+function cloudErrorText(e) {
+  const code = e && e.code ? String(e.code) : '';
+  const msg = e && e.message ? String(e.message) : '';
+  if (code === 'permission-denied') return 'Firebase no deja leer ni guardar tus datos. Revisa que publicaste las reglas de seguridad de Firestore tal como aparecen en la guía.';
+  if (code === 'not-found' || /database .* does not exist|not exist/i.test(msg)) return 'No encontramos la base de datos de tu proyecto. En Firebase, entra a Firestore Database y crea la base de datos.';
+  if (code === 'resource-exhausted') return 'Se alcanzó el límite gratis de Firebase por hoy. Tus cambios se guardarán cuando el límite se reinicie.';
+  if (code === 'unauthenticated') return 'Tu sesión expiró. Cierra sesión y vuelve a entrar.';
+  return 'No se pudo conectar con Firebase' + (code ? ' (' + code + ')' : '') + '. Revisa tu conexión y vuelve a intentarlo.';
+}
+function onCloudError(e, fromListener) {
+  cloudErr = cloudErrorText(e);
+  if (fromListener) FB.listenerDown = true;
+  scheduleRender();
+  if (!fromListener) toast('No se guardó el cambio. ' + cloudErr);
+}
+function retryCloud() {
+  if (!FB.user) return;
+  cloudErr = ''; FB.listenerDown = false;
+  unsubscribeAll();
+  subscribe(FB.user.uid);
+  render();
+}
+/* Guarda en Firebase la diferencia entre dos estados completos (respaldo, deshacer, subir datos locales) */
+function cloudSync(prev, next) {
+  const F = FB.F; const ops = [];
+  COLS.forEach(c => {
+    const a = prev[c] || {}, b = next[c] || {};
+    Object.keys(a).forEach(id => { if (!b[id]) ops.push({del: true, c, id}); });
+    Object.keys(b).forEach(id => { const body = JSON.parse(JSON.stringify(b[id])); delete body.id; ops.push({c, id, body}); });
+  });
+  const jobs = [];
+  for (let i = 0; i < ops.length; i += 450) {
+    const batch = F.writeBatch(FB.db);
+    ops.slice(i, i + 450).forEach(o => { if (o.del) batch.delete(userRef(o.c, o.id)); else batch.set(userRef(o.c, o.id), o.body); });
+    jobs.push(batch.commit());
+  }
+  return Promise.all(jobs).catch(e => onCloudError(e, false));
+}
+/* Datos que quedaron en este navegador antes de conectar Firebase */
+const migKey = () => 'cuotas-migracion-' + (FB.user ? FB.user.uid : '');
+function localSnapshot() {
+  try {
+    const raw = localStorage.getItem(LKEY); if (!raw) return null;
+    const o = JSON.parse(raw); const out = {};
+    COLS.forEach(c => {
+      const src = (o && o[c] && typeof o[c] === 'object') ? o[c] : {};
+      out[c] = {};
+      Object.keys(src).forEach(id => { if (src[id] && typeof src[id] === 'object' && !src[id].example) out[c][id] = Object.assign({}, src[id], {id}); });
+    });
+    return out;
+  } catch (e) { return null; }
+}
+function migrationOffer() {
+  if (!cloud() || FB.server.size < COLS.length) return null;
+  if (COLS.some(c => Object.keys(S[c]).length)) return null;
+  try { if (localStorage.getItem(migKey())) return null; } catch (e) { return null; }
+  const loc = localSnapshot(); if (!loc) return null;
+  const n = {purchases: Object.keys(loc.purchases).length, people: Object.keys(loc.people).length, cards: Object.keys(loc.cards).length};
+  return (n.purchases || n.people || n.cards) ? {loc, n} : null;
+}
+function migrate(accept) {
+  const off = migrationOffer();
+  try { localStorage.setItem(migKey(), accept ? 'subido' : 'descartado'); } catch (e) {}
+  if (!accept || !off) { render(); return; }
+  const prev = JSON.parse(JSON.stringify(S));
+  setAll(off.loc);
+  cloudSync(prev, S);
+  render();
+  toast(`Listo: subimos ${off.n.purchases} ${plural(off.n.purchases, 'compra', 'compras')} a tu cuenta.`);
+}
+
+/* ---------- inicio de sesión ---------- */
+function authMsg(e) {
+  const code = e && e.code ? String(e.code) : '';
+  const host = location.hostname || 'tu página';
+  switch (code) {
+    case 'auth/popup-closed-by-user': case 'auth/cancelled-popup-request': case 'auth/user-cancelled': return '';
+    case 'auth/popup-blocked': return 'El navegador bloqueó la ventana de Google. Permite ventanas emergentes para esta página o entra con tu correo.';
+    case 'auth/unauthorized-domain': return `Firebase todavía no autoriza ${host}. En Firebase, entra a Authentication → Settings → Authorized domains y agrega ${host}.`;
+    case 'auth/operation-not-allowed': case 'auth/configuration-not-found': return 'Este método de inicio de sesión no está activado. En Firebase, entra a Authentication → Sign-in method y activa Google o Correo electrónico/contraseña.';
+    case 'auth/operation-not-supported-in-this-environment': return 'Para iniciar sesión, abre la página desde su dirección web de GitHub Pages, no como archivo de tu computador.';
+    case 'auth/invalid-credential': case 'auth/invalid-login-credentials': case 'auth/wrong-password': case 'auth/user-not-found': return 'El correo o la contraseña no coinciden. Si no tienes cuenta, toca “Crear una”.';
+    case 'auth/email-already-in-use': return 'Ya existe una cuenta con ese correo. Toca “Entrar” para usarla.';
+    case 'auth/weak-password': return 'La contraseña debe tener al menos 6 caracteres.';
+    case 'auth/invalid-email': case 'auth/missing-email': return 'Revisa el correo; no parece válido.';
+    case 'auth/missing-password': return 'Escribe tu contraseña.';
+    case 'auth/too-many-requests': return 'Demasiados intentos seguidos. Espera unos minutos y vuelve a intentarlo.';
+    case 'auth/network-request-failed': return 'No hay conexión a internet. Revisa tu conexión y vuelve a intentarlo.';
+    case 'auth/invalid-api-key': case 'auth/api-key-not-valid.-please-pass-a-valid-api-key.': return 'Los datos de firebase-config.js no son válidos. Vuelve a copiarlos desde la configuración de tu proyecto en Firebase.';
+    default: return 'No se pudo iniciar sesión' + (code ? ' (' + code + ')' : '') + '. Vuelve a intentarlo.';
+  }
+}
+function authState(busy, err, info) {
+  const card = $('.auth-card'); if (!card) return;
+  card.querySelectorAll('button, input').forEach(el => { el.disabled = !!busy; });
+  const er = $('#au-err'); if (er) er.textContent = err || '';
+  const inf = $('#au-info'); if (inf) inf.textContent = info || '';
+}
+async function signInGoogle() {
+  authState(true);
+  try {
+    const p = new FB.A.GoogleAuthProvider();
+    try { p.setCustomParameters({prompt: 'select_account'}); } catch (e) {}
+    await FB.A.signInWithPopup(FB.auth, p);
+  } catch (e) { authState(false, authMsg(e)); }
+}
+async function signInEmail() {
+  const email = ($('#au-email') || {}).value || '';
+  const pass = ($('#au-pass') || {}).value || '';
+  authUI.email = email.trim();
+  if (!authUI.email) { authState(false, 'Escribe tu correo.'); $('#au-email').focus(); return; }
+  if (!pass) { authState(false, 'Escribe tu contraseña.'); $('#au-pass').focus(); return; }
+  authState(true);
+  try {
+    if (authUI.mode === 'create') await FB.A.createUserWithEmailAndPassword(FB.auth, authUI.email, pass);
+    else await FB.A.signInWithEmailAndPassword(FB.auth, authUI.email, pass);
+  } catch (e) { authState(false, authMsg(e)); }
+}
+async function resetPassword() {
+  const email = (($('#au-email') || {}).value || '').trim();
+  authUI.email = email;
+  if (!email) { authState(false, 'Escribe tu correo arriba y vuelve a tocar “Olvidé mi contraseña”.'); $('#au-email').focus(); return; }
+  authState(true);
+  try { await FB.A.sendPasswordResetEmail(FB.auth, email); authState(false, '', `Te enviamos un correo a ${email} para crear una contraseña nueva. Revisa también la carpeta de spam.`); }
+  catch (e) { authState(false, authMsg(e)); }
+}
+let signingOut = false;
+async function signOutNow() {
+  if (signingOut) return; signingOut = true;
+  toast('Cerrando sesión…');
+  try { localStorage.setItem(UIKEY, 'mes'); } catch (e) {}
+  unsubscribeAll();
+  try { await FB.A.signOut(FB.auth); } catch (e) {}
+  // Borra la copia guardada en este dispositivo para que nadie más la vea
+  try { await FB.F.terminate(FB.db); await FB.F.clearIndexedDbPersistence(FB.db); } catch (e) {}
+  location.reload();
+}
 const ui ={view: 'mes', month: todayKey(), filter: 'activas', fCard: '', fPerson: '', confirmClear: false};
 try { const v = localStorage.getItem(UIKEY); if (VIEWS.includes(v)) ui.view = v; } catch (e) {}
 { const h = (location.hash || '').slice(1); if (VIEWS.includes(h)) ui.view = h; }
@@ -536,15 +780,23 @@ function put(col, id, data) {
   const body = JSON.parse(JSON.stringify(data));
   delete body.id;
   S[col] = Object.assign({}, S[col], {[id]: Object.assign({}, body, {id})});
-  saveLocal();
   scheduleRender();
+  if (cloud()) { FB.F.setDoc(userRef(col, id), body).catch(e => onCloudError(e, false)); return Promise.resolve(); }
+  if (backend === 'local') saveLocal();
   return Promise.resolve();
 }
 function remove(col, id) {
   const o = Object.assign({}, S[col]); delete o[id]; S[col] = o;
-  saveLocal();
   scheduleRender();
+  if (cloud()) { FB.F.deleteDoc(userRef(col, id)).catch(e => onCloudError(e, false)); return Promise.resolve(); }
+  if (backend === 'local') saveLocal();
   return Promise.resolve();
+}
+/* Guarda el estado completo después de reemplazarlo (cargar respaldo o deshacerlo) */
+function commitAll(prev) {
+  if (cloud()) cloudSync(prev, S);
+  else saveLocal();
+  render();
 }
 
 /* ---------- respaldo ---------- */
@@ -571,9 +823,9 @@ function importData(file) {
     const datos = o && o.datos ? o.datos : o;
     if (!datos || typeof datos !== 'object' || !COLS.some(c => datos[c] && typeof datos[c] === 'object')) { toast('Ese archivo no es un respaldo válido de Cuotas Compartidas.'); return; }
     const before = JSON.parse(JSON.stringify(S));
-    setAll(datos); saveLocal(); render();
+    setAll(datos); commitAll(before);
     const n = Object.keys(S.purchases).length;
-    toast(`Respaldo cargado: ${n} ${plural(n, 'compra', 'compras')}.`, {label: 'Deshacer', fn: () => { setAll(before); saveLocal(); render(); }});
+    toast(`Respaldo cargado: ${n} ${plural(n, 'compra', 'compras')}.`, {label: 'Deshacer', fn: () => { const now = JSON.parse(JSON.stringify(S)); setAll(before); commitAll(now); }});
   };
   reader.onerror = () => toast('No se pudo leer el archivo. Inténtalo de nuevo.');
   reader.readAsText(file);
@@ -690,14 +942,24 @@ function render() {
   let sel = null; try { if (fid && typeof ae.selectionStart === 'number') sel = [ae.selectionStart, ae.selectionEnd]; } catch (e) {}
 
   document.querySelectorAll('.tabs [data-view], .bottomnav [data-view]').forEach(b => { if (b.dataset.view === ui.view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  const gate = backend === 'signedout' || backend === 'error' || backend === 'loading';
   const mb = $('#monthbar');
-  mb.hidden = ui.view === 'ajustes';
+  mb.hidden = ui.view === 'ajustes' || gate;
   $('#month-title').textContent = cap(mLabel(ui.month));
   $('#month-eyebrow').textContent = ui.view === 'proyeccion' ? 'Proyección desde' : ui.view === 'compras' ? 'Compras con cuota en' : 'Cobro de';
   $('#btn-today').hidden = ui.month === todayKey();
+  renderSync();
   renderNotice();
 
-  if (backend === 'loading') { view.innerHTML = '<div class="loading"><i></i>Cargando tus cuotas…</div>'; return; }
+  if (backend === 'loading') { view.innerHTML = `<div class="loading"><i></i>${FB.cfg ? 'Conectando con Firebase…' : 'Cargando tus cuotas…'}</div>`; return; }
+  if (backend === 'error') { view.innerHTML = viewLoadError(); return; }
+  if (backend === 'signedout') {
+    // No volver a dibujar la pantalla de inicio mientras se escribe en ella
+    if (!$('.auth-card') || view.dataset.authMode !== authUI.mode) { view.innerHTML = viewAuth(); view.dataset.authMode = authUI.mode; }
+    return;
+  }
+  view.dataset.authMode = '';
+  if (backend === 'cloud' && FB.ready.size < COLS.length) { view.innerHTML = '<div class="loading"><i></i>Cargando tus cuotas desde Firebase…</div>'; return; }
   if (ui.view === 'mes') view.innerHTML = viewMes();
   else if (ui.view === 'compras') view.innerHTML = viewCompras();
   else if (ui.view === 'proyeccion') view.innerHTML = viewProyeccion();
@@ -714,14 +976,74 @@ function render() {
   }
 }
 
+function renderSync() {
+  const el = $('#sync'); if (!el) return;
+  if (!cloud()) { el.hidden = true; return; }
+  let cls = 'ok', txt = 'Sincronizado';
+  if (!online) { cls = 'warn'; txt = 'Sin conexión'; }
+  else if (cloudErr) { cls = 'bad'; txt = 'Error al guardar'; }
+  else if (FB.pending.size || FB.server.size < COLS.length) { cls = 'busy'; txt = 'Guardando…'; }
+  el.hidden = false;
+  el.className = 'sync ' + cls;
+  el.title = txt;
+  el.setAttribute('aria-label', 'Estado de Firebase: ' + txt);
+  el.innerHTML = `<i aria-hidden="true"></i><span>${txt}</span>`;
+}
+
 function renderNotice() {
   const out = [];
-  if (!storageOk) out.push(`<div class="notice warn"><p>Este navegador no está guardando datos (puede ser una ventana privada o incógnito). Lo que agregues se perderá al cerrar la pestaña.</p></div>`);
-  if (backend !== 'loading' && hasExamples()) {
+  if (backend === 'local' && !storageOk) out.push(`<div class="notice warn"><p>Este navegador no está guardando datos (puede ser una ventana privada o incógnito). Lo que agregues se perderá al cerrar la pestaña.</p></div>`);
+  if (cloud() && !online) out.push(`<div class="notice warn"><p><strong>Sin conexión.</strong> Puedes seguir usando la página; los cambios se subirán a Firebase cuando vuelva internet.</p></div>`);
+  if (cloud() && cloudErr) out.push(`<div class="notice warn"><p>${esc(cloudErr)}</p><button type="button" class="btn small" data-act="cloud-retry">Reintentar</button></div>`);
+  const mig = backend === 'cloud' ? migrationOffer() : null;
+  if (mig) {
+    const parts = [];
+    if (mig.n.purchases) parts.push(mig.n.purchases + ' ' + plural(mig.n.purchases, 'compra', 'compras'));
+    if (mig.n.people) parts.push(mig.n.people + ' ' + plural(mig.n.people, 'persona', 'personas'));
+    if (mig.n.cards) parts.push(mig.n.cards + ' ' + plural(mig.n.cards, 'tarjeta', 'tarjetas'));
+    out.push(`<div class="notice"><p>Este navegador tiene <strong>${esc(parts.join(', '))}</strong> que guardaste antes de conectar Firebase. ¿Las subimos a tu cuenta?</p>
+      <div class="actions"><button type="button" class="btn small primary" data-act="migrate-yes">Subir a mi cuenta</button><button type="button" class="btn small ghost" data-act="migrate-no">No, gracias</button></div></div>`);
+  }
+  if ((backend === 'local' || backend === 'cloud') && hasExamples()) {
     out.push(`<div class="notice"><p><strong>Estos son datos de ejemplo</strong> para que veas cómo funciona. Cuando quieras, bórralos y agrega tus propias compras.</p>
       <button type="button" class="btn small ${ui.confirmClear ? 'confirm' : ''}" data-act="clear-examples">${ui.confirmClear ? 'Sí, borrar ejemplos' : 'Borrar datos de ejemplo'}</button></div>`);
   }
   $('#notice').innerHTML = out.join('');
+}
+
+/* ---------- Inicio de sesión ---------- */
+function viewAuth() {
+  const create = authUI.mode === 'create';
+  const asFile = location.protocol === 'file:';
+  return `<section class="auth">
+    <div class="auth-card">
+      <div class="auth-head">
+        <h2>${create ? 'Crea tu cuenta' : 'Entra para ver tus cuotas'}</h2>
+        <p>Tus compras se guardan en tu base de datos de Firebase y las ves en el celular y en el computador. Solo tu cuenta puede verlas.</p>
+      </div>
+      ${asFile ? '<p class="slip-note">Estás abriendo la página como archivo. Para iniciar sesión, ábrela desde su dirección de GitHub Pages (https://tu-usuario.github.io/…).</p>' : ''}
+      <button type="button" class="btn wide" data-act="auth-google">Continuar con Google</button>
+      <div class="or" role="separator"><span>o con tu correo</span></div>
+      <form id="auth-form" class="form" novalidate>
+        <label class="field"><span>Correo</span><input id="au-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" value="${esc(authUI.email)}" placeholder="tucorreo@gmail.com"></label>
+        <label class="field"><span>Contraseña${create ? ' (mínimo 6 caracteres)' : ''}</span><input id="au-pass" type="password" autocomplete="${create ? 'new-password' : 'current-password'}" minlength="6"></label>
+        <p class="form-err" id="au-err" role="alert"></p>
+        <p class="auth-info" id="au-info" role="status"></p>
+        <button type="submit" class="btn primary wide">${create ? 'Crear cuenta' : 'Entrar'}</button>
+      </form>
+      <div class="auth-links">
+        <button type="button" class="linkish" data-act="auth-toggle">${create ? '¿Ya tienes cuenta? Entra' : '¿No tienes cuenta? Crea una'}</button>
+        ${create ? '' : '<button type="button" class="linkish" data-act="auth-reset">Olvidé mi contraseña</button>'}
+      </div>
+    </div>
+  </section>`;
+}
+function viewLoadError() {
+  return `<section class="auth"><div class="auth-card">
+    <div class="auth-head"><h2>No se pudo conectar con Firebase</h2>
+    <p>La página no logró descargar Firebase. Revisa tu conexión a internet y vuelve a intentarlo. Si sigue igual, revisa que el archivo firebase-config.js tenga los datos de tu proyecto.</p></div>
+    <button type="button" class="btn primary wide" data-act="reload">Volver a intentar</button>
+  </div></section>`;
 }
 
 /* ---------- Mes ---------- */
@@ -953,7 +1275,28 @@ function viewAjustes() {
       <small>${useC(c.id)} ${plural(useC(c.id), 'compra', 'compras')}</small>
       <button type="button" class="btn small ghost danger" data-act="del-card" data-id="${esc(c.id)}">Eliminar</button>
     </li>`).join('') : '<li class="empty-line">Todavía no agregas tarjetas.</li>';
-  const storage = 'Tus compras, personas y pagos se guardan solo en este navegador, en este dispositivo: no se suben a internet ni a GitHub. Para pasarlos a otro dispositivo, descarga un respaldo aquí y cárgalo allá. Descárgalo también de vez en cuando por si borras el historial del navegador.';
+  let storagePanel;
+  if (cloud()) {
+    const who = FB.user.email || FB.user.displayName || 'tu cuenta';
+    storagePanel = `<div class="panel-head"><h2>Tu cuenta</h2>
+        <p>Entraste como <strong>${esc(who)}</strong>. Tus compras, personas y pagos se guardan en Firebase (proyecto <code>${esc(FB.cfg.projectId)}</code>) y solo tu cuenta puede verlos. Si te quedas sin internet, la página sigue funcionando y sube los cambios al reconectar.</p></div>
+      <p class="sync-line"><span class="${$('#sync') ? $('#sync').className : 'sync'}"><i aria-hidden="true"></i></span>${esc(online ? (cloudErr ? 'Hubo un error al guardar' : (FB.pending.size ? 'Guardando cambios…' : 'Todo está guardado en la nube')) : 'Sin conexión: los cambios se subirán al reconectar')}</p>
+      <div class="actions">
+        <button type="button" class="btn" data-act="export">Descargar respaldo</button>
+        <button type="button" class="btn" data-act="import">Cargar respaldo</button>
+        <button type="button" class="btn ghost danger" data-act="sign-out">Cerrar sesión</button>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>`;
+  } else {
+    storagePanel = `<div class="panel-head"><h2>Dónde se guardan tus datos</h2>
+        <p>Tus compras, personas y pagos se guardan solo en este navegador, en este dispositivo: no se suben a internet ni a GitHub. Para pasarlos a otro dispositivo, descarga un respaldo aquí y cárgalo allá.</p>
+        <p>Para guardarlos en la nube y verlos en todos tus dispositivos, conecta Firebase agregando el archivo <code>firebase-config.js</code> junto a esta página.</p></div>
+      <div class="actions">
+        <button type="button" class="btn" data-act="export">Descargar respaldo</button>
+        <button type="button" class="btn" data-act="import">Cargar respaldo</button>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>`;
+  }
   return `<div class="settings">
     <section class="panel">
       <div class="panel-head"><h2>Personas</h2><p>Las personas con las que divides compras. “Yo” siempre está disponible para tu parte.</p></div>
@@ -966,12 +1309,7 @@ function viewAjustes() {
       <form class="add-row" id="add-card" autocomplete="off"><input id="ac-name" placeholder="Ej: Visa Banco Estado" aria-label="Nombre de la tarjeta nueva"><input id="ac-cierre" class="short" type="number" min="1" max="31" inputmode="numeric" placeholder="Cierre" aria-label="Día de facturación"><button class="btn" type="submit">Agregar tarjeta</button></form>
     </section>
     <section class="panel">
-      <div class="panel-head"><h2>Dónde se guardan tus datos</h2><p>${esc(storage)}</p></div>
-      <div class="actions">
-        <button type="button" class="btn" data-act="export">Descargar respaldo</button>
-        <button type="button" class="btn" data-act="import">Cargar respaldo</button>
-        <input type="file" id="import-file" accept="application/json,.json" hidden>
-      </div>
+      ${storagePanel}
       ${hasExamples() ?`<div><button type="button" class="btn small ${ui.confirmClear ? 'confirm' : ''}" data-act="clear-examples">${ui.confirmClear ? 'Sí, borrar ejemplos' : 'Borrar datos de ejemplo'}</button></div>` : ''}
     </section>
   </div>`;
@@ -1379,6 +1717,14 @@ document.addEventListener('click', e => {
     case 'clear-examples': clearExamples(); break;
     case 'filter': ui.filter = t.dataset.v; render(); break;
     case 'load-examples': loadExamples(); break;
+    case 'auth-google': signInGoogle(); break;
+    case 'auth-toggle': { const em = $('#au-email'); if (em) authUI.email = em.value.trim(); authUI.mode = authUI.mode === 'create' ? 'login' : 'create'; render(); const f = $(authUI.email ? '#au-pass' : '#au-email'); if (f) f.focus(); break; }
+    case 'auth-reset': resetPassword(); break;
+    case 'sign-out': signOutNow(); break;
+    case 'cloud-retry': retryCloud(); break;
+    case 'migrate-yes': migrate(true); break;
+    case 'migrate-no': migrate(false); break;
+    case 'reload': location.reload(); break;
     case 'export': exportData(); break;
     case 'import': { const f = $('#import-file'); if (f) { f.value = ''; f.click(); } break; }
   }
@@ -1405,6 +1751,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('submit', e => {
   const f = e.target;
+  if (f.id === 'auth-form') { e.preventDefault(); signInEmail(); return; }
   if (f.id === 'add-person') {
     e.preventDefault();
     const inp = $('#ap-name'); const name = inp.value.trim();
@@ -1425,10 +1772,23 @@ document.addEventListener('submit', e => {
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#overlay').hidden) closeModal(); });
 
 /* ================= boot ================= */
-loadLocal();
-backend = 'local';
-render();
-window.addEventListener('storage', e => { if (e.key === LKEY) { loadLocal(); render(); } });
+window.addEventListener('online', () => { online = true; render(); });
+window.addEventListener('offline', () => { online = false; render(); });
+const cfg = fbConfig();
+if (cfg) {
+  // Con Firebase configurado: los datos viven en la nube, en la cuenta de quien inicia sesión
+  backend = 'loading';
+  document.body.dataset.auth = 'loading';
+  render();
+  initFirebase(cfg);
+} else {
+  // Sin Firebase: todo se guarda en este navegador
+  loadLocal();
+  backend = 'local';
+  document.body.dataset.auth = 'local';
+  render();
+  window.addEventListener('storage', e => { if (e.key === LKEY && backend === 'local') { loadLocal(); render(); } });
+}
 })();
 </script>
 </body>
