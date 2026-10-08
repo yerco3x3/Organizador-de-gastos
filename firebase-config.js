@@ -14,12 +14,12 @@
 // =====================================================================
 
 const firebaseConfig = {
-  apiKey: "PEGA_AQUI",
-  authDomain: "PEGA_AQUI",
-  projectId: "PEGA_AQUI",
-  storageBucket: "PEGA_AQUI",
-  messagingSenderId: "PEGA_AQUI",
-  appId: "PEGA_AQUI"
+  apiKey: "AIzaSyA6tj7fEtLOxNT5FUCvyXCtlbGdbkcCM2I",
+  authDomain: "organizador-de-gastos-6dacc.firebaseapp.com",
+  projectId: "organizador-de-gastos-6dacc",
+  storageBucket: "organizador-de-gastos-6dacc.firebasestorage.app",
+  messagingSenderId: "67659810745",
+  appId: "1:67659810745:web:3377060e134be7d7901868"
 };
 
 // No cambies esta línea:
