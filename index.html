@@ -567,6 +567,9 @@ let installEvt = null;
 // La app de Android (APK) agrega "CuotasApp/" al navegador interno y un puente para compartir
 const IN_APP = /\bCuotasApp\//.test(navigator.userAgent || '');
 const bridge = () => (window.CuotasAndroid && typeof window.CuotasAndroid.share === 'function') ? window.CuotasAndroid : null;
+const APP_PACKAGE = 'io.github.yerco3x3.cuotas';
+// Si Chrome abre la página con ?app-login=<código>, solo se usa para entrar con Google y volver a la app
+let appLoginNonce = null;
 const isStandalone = () => IN_APP || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const INSTALL_KEY = 'cuotas-instalar-oculto';
 const cloud = () => backend === 'cloud' && !!(FB.db && FB.user);
@@ -594,9 +597,10 @@ async function initFirebase(cfg) {
       cloudErr = '';
       FB.user = user || null;
       backend = user ? 'cloud' : 'signedout';
-      document.body.dataset.auth = user ? 'in' : 'out';
-      if (user) subscribe(user.uid);
+      document.body.dataset.auth = (user && !appLoginNonce) ? 'in' : 'out';
+      if (user && !appLoginNonce) subscribe(user.uid);
       render();
+      if (!user && IN_APP) setTimeout(appTokenLogin, 0);
     });
   } catch (e) {
     FB.loadErr = e;
@@ -964,6 +968,14 @@ function render() {
   $('#month-title').textContent = cap(mLabel(ui.month));
   $('#month-eyebrow').textContent = ui.view === 'proyeccion' ? 'Proyección desde' : ui.view === 'compras' ? 'Compras con cuota en' : 'Cobro de';
   $('#btn-today').hidden = ui.month === todayKey();
+  if (appLoginNonce) {
+    mb.hidden = true;
+    $('#notice').innerHTML = '';
+    $('#sync').hidden = true;
+    document.body.dataset.auth = 'out';
+    if (!$('.auth-card[data-app-login]')) view.innerHTML = viewAppLogin();
+    return;
+  }
   renderSync();
   renderNotice();
 
@@ -1033,6 +1045,74 @@ function renderNotice() {
   $('#notice').innerHTML = out.join('');
 }
 
+/* ---------- Entrar con Google desde la app de Android ----------
+ * 1. En la app, "Continuar con Google" pide a Android abrir el navegador con un código de un solo uso.
+ * 2. En el navegador, esta página (con ?app-login=<código>) abre la ventana de Google.
+ * 3. "Volver a la app" abre solo la app io.github.yerco3x3.cuotas con la credencial y el código.
+ * 4. La app revisa el código y la página entra con esa credencial de Google.
+ */
+function startAppGoogle() {
+  const b = window.CuotasAndroid;
+  if (!b || typeof b.googleLogin !== 'function') { authState(false, 'Actualiza la app de Android para entrar con Google, o entra con tu correo.'); return; }
+  try { b.googleLogin(); authState(false, '', 'Elige tu cuenta en el navegador y luego toca “Volver a la app”.'); }
+  catch (e) { authState(false, 'No se pudo abrir el navegador. Vuelve a intentarlo.'); }
+}
+let appTokenBusy = false;
+async function appTokenLogin() {
+  const b = window.CuotasAndroid;
+  if (appTokenBusy || backend !== 'signedout' || !b || typeof b.takeGoogleToken !== 'function' || !FB.A || !FB.auth) return;
+  let tok = null;
+  try { tok = b.takeGoogleToken(); } catch (e) {}
+  if (!tok) return;
+  appTokenBusy = true;
+  authState(true, '', 'Entrando con tu cuenta de Google…');
+  try { await FB.A.signInWithCredential(FB.auth, FB.A.GoogleAuthProvider.credential(tok)); }
+  catch (e) {
+    const code = e && e.code ? String(e.code) : '';
+    authState(false, (code === 'auth/invalid-credential' || code === 'auth/user-token-expired') ? 'El inicio con Google expiró. Vuelve a tocar “Continuar con Google”.' : authMsg(e));
+  }
+  appTokenBusy = false;
+}
+window.cuotasAppLogin = () => { appTokenLogin(); };
+document.addEventListener('visibilitychange', () => { if (IN_APP && document.visibilityState === 'visible') appTokenLogin(); });
+
+function viewAppLogin() {
+  return `<section class="auth"><div class="auth-card" data-app-login>
+    <div class="auth-head"><h2>Entrar a la app con Google</h2>
+    <p>Elige tu cuenta de Google y después vuelve a la app Cuotas para terminar de entrar.</p></div>
+    <button type="button" class="btn primary wide" data-act="app-login-google">Elegir cuenta de Google</button>
+    <p class="form-err" id="al-err" role="alert"></p>
+    <div id="al-done" class="form" hidden>
+      <p class="auth-info">Listo, elegiste <span id="al-email"></span>.</p>
+      <a class="btn primary wide" id="al-back" href="#">Volver a la app</a>
+      <p class="hint">Si no vuelve sola, abre Cuotas desde su ícono.</p>
+    </div>
+  </div></section>`;
+}
+async function appLoginGoogle() {
+  const err = $('#al-err'), btn = $('[data-act="app-login-google"]');
+  if (err) err.textContent = '';
+  if (!FB.A || !FB.auth) { if (err) err.textContent = FB.cfg ? 'Firebase todavía está cargando. Espera un momento y vuelve a tocar.' : 'Esta página no está conectada a Firebase.'; return; }
+  if (btn) btn.disabled = true;
+  try {
+    const p = new FB.A.GoogleAuthProvider();
+    try { p.setCustomParameters({prompt: 'select_account'}); } catch (e) {}
+    const res = await FB.A.signInWithPopup(FB.auth, p);
+    const cred = FB.A.GoogleAuthProvider.credentialFromResult(res);
+    if (!cred || !cred.idToken) throw {code: 'sin-token'};
+    const url = 'intent://login#Intent;scheme=cuotas;package=' + APP_PACKAGE +
+      ';S.state=' + encodeURIComponent(appLoginNonce) + ';S.token=' + encodeURIComponent(cred.idToken) + ';end';
+    $('#al-back').href = url;
+    $('#al-email').textContent = (res && res.user && res.user.email) || 'tu cuenta';
+    $('#al-done').hidden = false;
+    if (btn) btn.hidden = true;
+  } catch (e) {
+    const msg = e && e.code === 'sin-token' ? 'Google no entregó los datos para entrar. Vuelve a intentarlo.' : authMsg(e);
+    if (err) err.textContent = msg;
+    if (btn) btn.disabled = false;
+  }
+}
+
 /* ---------- Inicio de sesión ---------- */
 function viewAuth() {
   const create = authUI.mode === 'create';
@@ -1044,9 +1124,9 @@ function viewAuth() {
         <p>Tus compras se guardan en tu base de datos de Firebase y las ves en el celular y en el computador. Solo tu cuenta puede verlas.</p>
       </div>
       ${asFile ? '<p class="slip-note">Estás abriendo la página como archivo. Para iniciar sesión, ábrela desde su dirección de GitHub Pages (https://tu-usuario.github.io/…).</p>' : ''}
-      ${IN_APP ? `<p class="slip-note">En la app de Android se entra con correo y contraseña. Si usas tu cuenta de Google, primero crea una contraseña en la página web desde Chrome: Personas → Tu cuenta → Contraseña para la app.</p>`
-        : `<button type="button" class="btn wide" data-act="auth-google">Continuar con Google</button>
-      <div class="or" role="separator"><span>o con tu correo</span></div>`}
+      <button type="button" class="btn wide" data-act="${IN_APP ? 'app-google' : 'auth-google'}">Continuar con Google</button>
+      ${IN_APP ? '<p class="hint">Se abrirá el navegador para que elijas tu cuenta. Después toca “Volver a la app”.</p>' : ''}
+      <div class="or" role="separator"><span>o con tu correo</span></div>
       <form id="auth-form" class="form" novalidate>
         <label class="field"><span>Correo</span><input id="au-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" value="${esc(authUI.email)}" placeholder="tucorreo@gmail.com"></label>
         <label class="field"><span>Contraseña${create ? ' (mínimo 6 caracteres)' : ''}</span><input id="au-pass" type="password" autocomplete="${create ? 'new-password' : 'current-password'}" minlength="6"></label>
@@ -1349,7 +1429,7 @@ function appPasswordBlock() {
   }
   return `<div class="app-pass">
       <h3>Contraseña para la app de Android</h3>
-      <p>La app de Android se entra con correo y contraseña. Crea una aquí para usar esta misma cuenta (${esc(FB.user.email)}) y ver los mismos datos.</p>
+      <p>Opcional: crea una contraseña para entrar a la app de Android también con tu correo (${esc(FB.user.email)}), sin pasar por el navegador.</p>
       <form class="add-row" id="link-pass" autocomplete="off" novalidate>
         <input id="lp-pass" type="password" autocomplete="new-password" minlength="6" placeholder="Contraseña nueva (mínimo 6)" aria-label="Contraseña nueva para la app">
         <button class="btn" type="submit">Crear contraseña</button>
@@ -1821,6 +1901,8 @@ document.addEventListener('click', e => {
     case 'filter': ui.filter = t.dataset.v; render(); break;
     case 'load-examples': loadExamples(); break;
     case 'auth-google': signInGoogle(); break;
+    case 'app-google': startAppGoogle(); break;
+    case 'app-login-google': appLoginGoogle(); break;
     case 'auth-toggle': { const em = $('#au-email'); if (em) authUI.email = em.value.trim(); authUI.mode = authUI.mode === 'create' ? 'login' : 'create'; render(); const f = $(authUI.email ? '#au-pass' : '#au-email'); if (f) f.focus(); break; }
     case 'auth-reset': resetPassword(); break;
     case 'sign-out': signOutNow(); break;
@@ -1889,7 +1971,10 @@ async function installApp() {
 // Atajo "Nueva compra" del ícono: ?accion=nueva
 let pendingAction = null;
 try {
-  pendingAction = new URLSearchParams(location.search).get('accion');
+  const q = new URLSearchParams(location.search);
+  pendingAction = q.get('accion');
+  const nonce = q.get('app-login');
+  if (!IN_APP && nonce && /^[0-9a-f-]{36}$/i.test(nonce)) appLoginNonce = nonce;
   if (location.search) history.replaceState(null, '', location.pathname + location.hash);
 } catch (e) {}
 // Botón Atrás de Android: cierra formularios y vuelve a Mes antes de salir
