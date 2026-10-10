@@ -156,6 +156,7 @@ input,select,textarea{font:inherit;color:inherit}
 .sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .sec-head h2{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .sec-head small{color:var(--muted);font-size:13px}
+.sec-actions{display:inline-flex;align-items:center;gap:10px;margin-left:auto}
 
 /* ---------- summary ---------- */
 .summary{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;container-type:inline-size}
@@ -572,7 +573,7 @@ let installEvt = null;
 const IN_APP = /\bCuotasApp\//.test(navigator.userAgent || '');
 const bridge = () => (window.CuotasAndroid && typeof window.CuotasAndroid.share === 'function') ? window.CuotasAndroid : null;
 const APP_PACKAGE = 'io.github.yerco3x3.cuotas';
-const PAGE_VERSION = '1.5';
+const PAGE_VERSION = '1.6';
 // Si Chrome abre la página con ?app-login=<código>, solo se usa para entrar con Google y volver a la app
 let appLoginNonce = null;
 const isStandalone = () => IN_APP || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -1195,7 +1196,7 @@ function viewMes() {
   </section>`;
 
   const slips = rows.length ? `<section>
-    <div class="sec-head"><h2>Quién te debe en ${esc(MONTHS[mParse(m).m - 1])}</h2><small>${rows.length} ${plural(rows.length, 'persona', 'personas')}</small></div>
+    <div class="sec-head"><h2>Quién te debe en ${esc(MONTHS[mParse(m).m - 1])}</h2><span class="sec-actions"><small>${rows.length} ${plural(rows.length, 'persona', 'personas')}</small><button type="button" class="btn small" data-act="report">Informe PDF</button></span></div>
     <div class="slips">${rows.map(r => slipHTML(r.p, r.pm, r.ar, m)).join('')}</div>
   </section>` : `<section class="empty"><h3>Nadie te debe en ${esc(mLabel(m))}</h3><p>Todas las cuotas de este mes son tuyas.</p></section>`;
 
@@ -1419,8 +1420,9 @@ function viewAjustes() {
   </div>`;
 }
 function backupButtons() {
-  if (bridge()) return '<button type="button" class="btn" data-act="export">Compartir respaldo</button>';
-  return `<button type="button" class="btn" data-act="export">Descargar respaldo</button>
+  const rep = '<button type="button" class="btn" data-act="report">Informe PDF</button>';
+  if (bridge()) return rep + '<button type="button" class="btn" data-act="export">Compartir respaldo</button>';
+  return rep + `<button type="button" class="btn" data-act="export">Descargar respaldo</button>
         <button type="button" class="btn" data-act="import">Cargar respaldo</button>
         <input type="file" id="import-file" accept="application/json,.json" hidden>`;
 }
@@ -1581,6 +1583,452 @@ function copyMessage(pid) {
 }
 const canShare = () => !!bridge() || (typeof navigator.share === 'function' && matchMedia('(pointer:coarse)').matches);
 
+/* ================= informe PDF ================= */
+/* Generador de PDF propio: tipografía Helvetica estándar, sin librerías externas (funciona sin internet). */
+const PDF_W = {H: [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584,761,556,0,222,556,333,1000,556,556,333,1000,667,333,1000,0,611,0,0,222,222,333,333,350,556,1000,333,1000,500,333,944,0,500,667,278,333,556,556,556,556,260,556,333,737,370,556,584,333,737,333,400,584,333,333,333,556,537,278,333,333,365,556,834,834,834,611,667,667,667,667,667,667,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,500,556,556,556,556,278,278,278,278,556,556,556,556,556,556,556,584,611,556,556,556,556,500,556,500], B: [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584,761,556,0,278,556,500,1000,556,556,333,1000,667,333,1000,0,611,0,0,278,278,500,500,350,556,1000,333,1000,556,333,944,0,500,667,278,333,556,556,556,556,280,556,333,737,370,556,584,333,737,333,400,584,333,333,333,611,556,278,333,333,365,556,834,834,834,611,722,722,722,722,722,722,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,556,556,556,556,556,278,278,278,278,611,611,611,611,611,611,611,584,611,611,611,611,611,556,611,556]};
+const WIN1252 = {0x20AC:0x80,0x201A:0x82,0x0192:0x83,0x201E:0x84,0x2026:0x85,0x2020:0x86,0x2021:0x87,0x02C6:0x88,0x2030:0x89,0x0160:0x8A,0x2039:0x8B,0x0152:0x8C,0x017D:0x8E,0x2018:0x91,0x2019:0x92,0x201C:0x93,0x201D:0x94,0x2022:0x95,0x2013:0x96,0x2014:0x97,0x02DC:0x98,0x2122:0x99,0x0161:0x9A,0x203A:0x9B,0x0153:0x9C,0x017E:0x9E,0x0178:0x9F};
+// Convierte texto a los códigos de la tipografía; los emojis y símbolos que Helvetica no tiene se omiten
+function winCodes(s) {
+  const out = [];
+  for (const ch of String(s == null ? '' : s).normalize('NFC')) {
+    const c = ch.codePointAt(0);
+    if ((c >= 32 && c < 127) || (c >= 0xA0 && c <= 0xFF)) out.push(c);
+    else if (WIN1252[c]) out.push(WIN1252[c]);
+    else if (c === 9 || c === 10) out.push(32);
+  }
+  return out;
+}
+const pdfClean = s => String.fromCharCode(...winCodes(s)).replace(/ {2,}/g, ' ').trim();
+function textW(s, font, size) {
+  const t = PDF_W[font === 'B' || font === 'BI' ? 'B' : 'H'];
+  let w = 0;
+  for (const c of winCodes(s)) w += t[c - 32] || 556;
+  return w * size / 1000;
+}
+function pdfStr(s) {
+  let o = '(';
+  for (const c of winCodes(s)) {
+    if (c === 40 || c === 41 || c === 92) o += '\\' + String.fromCharCode(c);
+    else if (c > 126) o += '\\' + c.toString(8).padStart(3, '0');
+    else o += String.fromCharCode(c);
+  }
+  return o + ')';
+}
+
+class Pdf {
+  constructor() { this.W = 595.28; this.H = 841.89; this.pages = []; this.addPage(); }
+  addPage() { this.ops = []; this.pages.push(this.ops); return this; }
+  n(v) { return String(Math.round(v * 100) / 100); }
+  rgb(c) { return c.map(v => this.n(v / 255)).join(' '); }
+  rect(x, y, w, h, fill, r) {
+    const Y = this.H - y - h;
+    this.ops.push(this.rgb(fill) + ' rg ' + (r ? this.round(x, Y, w, h, r) : `${this.n(x)} ${this.n(Y)} ${this.n(w)} ${this.n(h)} re`) + ' f');
+  }
+  round(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2); const k = 0.5523 * r, n = v => this.n(v);
+    return `${n(x + r)} ${n(y)} m ${n(x + w - r)} ${n(y)} l ${n(x + w - r + k)} ${n(y)} ${n(x + w)} ${n(y + r - k)} ${n(x + w)} ${n(y + r)} c ` +
+      `${n(x + w)} ${n(y + h - r)} l ${n(x + w)} ${n(y + h - r + k)} ${n(x + w - r + k)} ${n(y + h)} ${n(x + w - r)} ${n(y + h)} c ` +
+      `${n(x + r)} ${n(y + h)} l ${n(x + r - k)} ${n(y + h)} ${n(x)} ${n(y + h - r + k)} ${n(x)} ${n(y + h - r)} c ` +
+      `${n(x)} ${n(y + r)} l ${n(x)} ${n(y + r - k)} ${n(x + r - k)} ${n(y)} ${n(x + r)} ${n(y)} c h`;
+  }
+  line(x1, y1, x2, y2, color, w, dash) {
+    this.ops.push(`q ${this.rgb(color)} RG ${this.n(w || 0.6)} w ${dash ? '[' + dash.join(' ') + '] 0 d ' : ''}${this.n(x1)} ${this.n(this.H - y1)} m ${this.n(x2)} ${this.n(this.H - y2)} l S Q`);
+  }
+  poly(pts, color, w) {
+    const p = pts.map((q, i) => `${this.n(q[0])} ${this.n(this.H - q[1])} ${i ? 'l' : 'm'}`).join(' ');
+    this.ops.push(`q ${this.rgb(color)} RG ${this.n(w)} w 1 J 1 j ${p} S Q`);
+  }
+  tri(pts, fill) {
+    this.ops.push(`${this.rgb(fill)} rg ` + pts.map((q, i) => `${this.n(q[0])} ${this.n(this.H - q[1])} ${i ? 'l' : 'm'}`).join(' ') + ' h f');
+  }
+  circle(cx, cy, r, fill) {
+    const k = 0.5523 * r, n = v => this.n(v), Y = this.H - cy;
+    this.ops.push(`${this.rgb(fill)} rg ${n(cx + r)} ${n(Y)} m ${n(cx + r)} ${n(Y + k)} ${n(cx + k)} ${n(Y + r)} ${n(cx)} ${n(Y + r)} c ${n(cx - k)} ${n(Y + r)} ${n(cx - r)} ${n(Y + k)} ${n(cx - r)} ${n(Y)} c ${n(cx - r)} ${n(Y - k)} ${n(cx - k)} ${n(Y - r)} ${n(cx)} ${n(Y - r)} c ${n(cx + k)} ${n(Y - r)} ${n(cx + r)} ${n(Y - k)} ${n(cx + r)} ${n(Y)} c f`);
+  }
+  text(s, x, y, o) {
+    o = o || {};
+    const size = o.size || 9, font = o.font || 'H', w = textW(s, font, size);
+    const X = o.align === 'right' ? x - w : o.align === 'center' ? x - w / 2 : x;
+    const f = {H: 'F1', B: 'F2', I: 'F3', BI: 'F4'}[font] || 'F1';
+    this.ops.push(`BT ${this.rgb(o.color || [21, 25, 41])} rg /${f} ${this.n(size)} Tf ${this.n(X)} ${this.n(this.H - y)} Td ${pdfStr(s)} Tj ET`);
+    return w;
+  }
+  wrap(s, width, font, size) {
+    const words = pdfClean(s).split(' '); const lines = []; let cur = '';
+    words.forEach(wd => { const t = cur ? cur + ' ' + wd : wd; if (textW(t, font, size) <= width || !cur) cur = t; else { lines.push(cur); cur = wd; } });
+    if (cur) lines.push(cur);
+    return lines;
+  }
+  fit(s, width, font, size) {
+    s = pdfClean(s);
+    if (textW(s, font, size) <= width) return s;
+    while (s.length > 1 && textW(s + '...', font, size) > width) s = s.slice(0, -1);
+    return s.trim() + '...';
+  }
+  output(meta) {
+    const objs = [], add = s => { objs.push(s); return objs.length; };
+    const catalog = add(''), pagesObj = add('');
+    const fonts = {F1: 'Helvetica', F2: 'Helvetica-Bold', F3: 'Helvetica-Oblique', F4: 'Helvetica-BoldOblique'};
+    const fontRefs = Object.keys(fonts).map(k => `/${k} ${add(`<< /Type /Font /Subtype /Type1 /BaseFont /${fonts[k]} /Encoding /WinAnsiEncoding >>`)} 0 R`).join(' ');
+    const kids = this.pages.map(ops => {
+      const content = ops.join('\n');
+      const c = add(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+      return add(`<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 ${this.n(this.W)} ${this.n(this.H)}] /Resources << /Font << ${fontRefs} >> >> /Contents ${c} 0 R >>`);
+    });
+    objs[catalog - 1] = `<< /Type /Catalog /Pages ${pagesObj} 0 R >>`;
+    objs[pagesObj - 1] = `<< /Type /Pages /Kids [${kids.map(k => k + ' 0 R').join(' ')}] /Count ${kids.length} >>`;
+    const info = add(`<< /Title ${pdfStr(meta.title)} /Author ${pdfStr(meta.author || '')} /Creator (Cuotas Compartidas) /Producer (Cuotas Compartidas) /CreationDate (D:${meta.date}) >>`);
+    let out = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
+    const offs = objs.map((o, i) => { const at = out.length; out += `${i + 1} 0 obj\n${o}\nendobj\n`; return at; });
+    const xref = out.length;
+    out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+    out += `trailer\n<< /Size ${objs.length + 1} /Root ${catalog} 0 R /Info ${info} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    return out; // una "cadena binaria": cada carácter es un byte
+  }
+}
+
+/* ---------- datos del informe ---------- */
+const PC = {
+  accent: [44, 65, 194], accentSoft: [225, 229, 251], ink: [21, 25, 41], muted: [92, 97, 118], line: [217, 220, 230],
+  grey: [242, 243, 247], shade: [236, 238, 244], white: [255, 255, 255], bandText: [228, 232, 255],
+  ok: [27, 150, 90], amber: [236, 150, 0], red: [222, 50, 50], seg: [236, 239, 252], dash: [150, 162, 230],
+};
+const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const fmtD = d => pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear();
+const bucketOf = days => days >= 90 ? 3 : days >= 60 ? 2 : days >= 30 ? 1 : 0;
+
+function reportData(pid) {
+  const today = startOfDay(new Date()), M = todayKey();
+  const ids = people().map(p => p.id).filter(id => !pid || id === pid);
+  const buckets = [0, 0, 0, 0], perPerson = [], late = [], detail = [];
+  ids.forEach(id => {
+    const b = [0, 0, 0, 0]; let total = 0;
+    const start = firstMonthOf(id), o = outlook(id, M);
+    const end = o.end && mDiff(o.end, M) > 0 ? o.end : M;
+    if (start) for (let k = start; mDiff(end, k) >= 0; k = mAdd(k, 1)) {
+      const pm = personMonth(id, k), left = Math.max(0, pm.owed - pm.paid);
+      if (!left) continue;
+      total += left;
+      let days = 0;
+      // La cuota de un mes vence el último día de ese mes
+      if (mDiff(M, k) > 0) {
+        const {y, m} = mParse(k), due = new Date(y, m, 0);
+        days = Math.max(0, Math.round((today - due) / 86400000));
+        late.push({id, month: k, due, days, amount: left});
+      }
+      b[bucketOf(days)] += left;
+    }
+    const active = purchases().filter(p => num(p.split[id]) > 0 && mDiff(lastMonth(p), M) >= 0);
+    if (total > 0 || active.length) perPerson.push({id, name: personName(id), active: active.length, total, b});
+    b.forEach((v, i) => { buckets[i] += v; });
+    active.forEach(p => {
+      let rest = 0;
+      for (let k = mDiff(p.first, M) > 0 ? p.first : M; mDiff(lastMonth(p), k) >= 0; k = mAdd(k, 1)) rest += owedIn(p, id, k);
+      if (rest <= 0) return;
+      const k = cuotaIndex(p, M);
+      detail.push({desc: p.desc, who: personName(id), card: cardName(p.cardId), cuota: k ? `${k}/${pn(p)}` : 'desde ' + mShort(p.first), valor: Math.floor(num(p.split[id]) / pn(p)), rest});
+    });
+  });
+  perPerson.sort((a, c) => c.total - a.total || String(a.name).localeCompare(String(c.name), 'es'));
+  late.sort((a, c) => c.days - a.days);
+  detail.sort((a, c) => String(a.who).localeCompare(String(c.who), 'es') || c.rest - a.rest);
+  const cards = cardsList().map(c => {
+    let total = 0, others = 0;
+    purchases().forEach(p => {
+      if (p.cardId !== c.id) return;
+      total += purchaseMonthTotal(p, M);
+      ids.forEach(id => { others += owedIn(p, id, M); });
+    });
+    return {name: c.name, total, others};
+  }).filter(x => x.others > 0 || (!pid && x.total > 0));
+  const pays = payments().filter(x => ids.includes(x.personId)).sort((a, c) => String(c.date).localeCompare(String(a.date))).slice(0, 12)
+    .map(x => ({who: personName(x.personId), date: x.date, month: x.month, amount: Math.round(num(x.amount))}));
+  return {pid, M, today, buckets, total: buckets.reduce((s, v) => s + v, 0), perPerson, late, detail, cards, pays};
+}
+
+/* ---------- dibujo del informe ---------- */
+function buildReport(pid) {
+  const d = reportData(pid);
+  const pdf = new Pdf(), W = pdf.W, H = pdf.H, L = 40, R = W - 40, BOTTOM = H - 78;
+  const who = pid ? pdfClean(personName(pid)) || 'Persona' : '';
+  const account = cloud() && FB.user ? (FB.user.email || '') : '';
+  const mon = MONTHS[mParse(d.M).m - 1];
+  const amt = v => v ? money(v) : '-';
+  const st = {y: 0};
+
+  // Logo: tarjeta con tres cuotas
+  const logo = (x, y, s) => {
+    pdf.rect(x, y, 26 * s, 18 * s, PC.accent, 3.5 * s);
+    [1, 0.7, 0.4].forEach((a, i) => pdf.rect(x + (4 + i * 6) * s, y + 11 * s, 4 * s, 3 * s, PC.accent.map(v => Math.round(v + (255 - v) * a)), 0.8 * s));
+  };
+  // Encabezado
+  logo(L, 40, 1.35);
+  pdf.text('CUOTAS', L + 42, 50, {font: 'B', size: 7.5, color: PC.muted});
+  pdf.text('COMPARTIDAS', L + 42, 59, {font: 'B', size: 7.5, color: PC.muted});
+  pdf.text('Informe de Deudas', L, 96, {font: 'B', size: 22, color: PC.accent});
+  const cx = 300;
+  pdf.line(R + 0.5, 40, R + 0.5, 104, PC.line, 0.8);
+  const intro = pid ? `Se detalla lo que te debe ${who} por compras hechas con tus tarjetas de crédito, según lo registrado en tu cuenta de Cuotas Compartidas.`
+    : 'Se detallan las deudas de las personas con las que compartes compras de tus tarjetas de crédito, según lo registrado en tu cuenta de Cuotas Compartidas.';
+  let iy = 50;
+  pdf.wrap(intro, R - cx - 12, 'H', 9).slice(0, 3).forEach(l => { pdf.text(l, cx, iy, {size: 9}); iy += 12; });
+  pdf.text(pdfClean(`INFORME EMITIDO EL ${fmtD(new Date())} · ${pid ? 'PERSONA: ' + who.toUpperCase() : 'TODAS LAS PERSONAS'}`), cx, 96, {font: 'B', size: 6.5});
+  if (account) pdf.text(pdfClean('CUENTA: ' + account), cx, 105, {font: 'B', size: 6.5, color: PC.muted});
+
+  // Banda: deuda total y estado de pago
+  const by = 122, bh = 158;
+  pdf.rect(0, by, W, bh, PC.accent);
+  pdf.text(pid ? 'Deuda total' : 'Deuda total', L, by + 30, {font: 'B', size: 15, color: PC.white});
+  pdf.text('y estado de pago', L, by + 48, {font: 'B', size: 15, color: PC.white});
+  pdf.text(money(d.total), 296, by + 44, {font: 'B', size: 25, color: PC.white, align: 'right'});
+  const desc = pid ? `Corresponde a la suma de las cuotas que ${who} te debe: las atrasadas, las de ${mon} y las de los próximos meses. Se informa además cuánto está atrasado y desde hace cuántos días.`
+    : `Corresponde a la suma de las cuotas que te deben todas las personas: las atrasadas, las de ${mon} y las de los próximos meses. Se informa además cuánto está atrasado y desde hace cuántos días.`;
+  let dy = by + 74;
+  pdf.wrap(desc, 250, 'I', 9).slice(0, 6).forEach(l => { pdf.text(l, L, dy, {font: 'I', size: 9, color: PC.bandText}); dy += 12.5; });
+  // Barra de atrasos
+  const bx = 318, bw = R - bx, sw = (bw - 6) / 4, segY = by + 26;
+  const worst = [3, 2, 1].find(i => d.buckets[i] > 0);
+  const active = worst !== undefined ? worst : 0;
+  const segColor = [PC.ok, PC.amber, PC.amber, PC.red];
+  for (let i = 0; i < 4; i++) {
+    const x = bx + i * (sw + 2);
+    pdf.rect(x, segY, sw, 15, i === active && d.total > 0 ? segColor[i] : PC.seg, 4);
+  }
+  if (d.total > 0) { const ax = bx + active * (sw + 2) + sw / 2; pdf.tri([[ax - 5, segY + 15.5], [ax + 5, segY + 15.5], [ax, segY + 10]], PC.white); }
+  const labels = [['0 a 29 días', 'de atraso'], ['30 a 59 días', 'de atraso'], ['60 a 89 días', 'de atraso'], ['90 o más días', 'de atraso']];
+  labels.forEach((lb, i) => {
+    const x = bx + i * (sw + 2) + sw / 2;
+    pdf.text(lb[0], x, segY + 32, {font: 'B', size: 7.5, color: PC.white, align: 'center'});
+    pdf.text(lb[1], x, segY + 41, {size: 7.5, color: PC.bandText, align: 'center'});
+  });
+  pdf.line(bx, segY + 54, R, segY + 54, PC.dash, 0.7, [3, 2]);
+  d.buckets.forEach((v, i) => {
+    const x = bx + i * (sw + 2) + sw / 2, ty = segY + 74;
+    if (!v) { pdf.text('-', x, ty, {font: 'B', size: 10, color: PC.white, align: 'center'}); return; }
+    const s = money(v);
+    let fs = 10; while (fs > 7 && textW(s, 'B', fs) + 14 > sw) fs -= 0.5;   // montos grandes: letra un poco menor para que no se junten
+    const w = textW(s, 'B', fs), x0 = x - (w + 14) / 2;
+    pdf.text(s, x0, ty, {font: 'B', size: fs, color: PC.white});
+    const ix = x0 + w + 9, iy2 = ty - 3.5;
+    pdf.circle(ix, iy2, 5.2, PC.white);
+    pdf.circle(ix, iy2, 4.4, i === 0 ? PC.ok : i === 3 ? PC.red : PC.amber);
+    if (i === 0) pdf.poly([[ix - 2.2, iy2], [ix - 0.5, iy2 + 1.8], [ix + 2.4, iy2 - 1.9]], PC.white, 1.1);
+    else if (i === 3) { pdf.poly([[ix - 1.8, iy2 - 1.8], [ix + 1.8, iy2 + 1.8]], PC.white, 1.1); pdf.poly([[ix + 1.8, iy2 - 1.8], [ix - 1.8, iy2 + 1.8]], PC.white, 1.1); }
+    else { pdf.poly([[ix, iy2 - 2.4], [ix, iy2 + 0.6]], PC.white, 1.2); pdf.circle(ix, iy2 + 2.2, 0.65, PC.white); }
+  });
+  // Pestaña
+  pdf.rect(L + 22, by + bh - 34, 300, 44, PC.white, 6);
+  pdf.rect(L + 22, by + bh - 12, 300, 30, PC.white);
+  pdf.text('¿Cómo se compone esta deuda?', L + 34, by + bh - 6, {size: 17, color: [70, 74, 92]});
+  st.y = by + bh + 34;
+
+  /* --- utilidades de diseño --- */
+  const newPage = () => {
+    pdf.addPage();
+    logo(L, 34, 0.9);
+    pdf.text('Informe de Deudas', L + 30, 46, {font: 'B', size: 11, color: PC.accent});
+    pdf.text(pdfClean(`${pid ? who + ' · ' : ''}emitido el ${fmtD(new Date())}`), R, 46, {size: 8, color: PC.muted, align: 'right'});
+    pdf.line(L, 58, R, 58, PC.line, 0.6);
+    st.y = 82;
+  };
+  const ensure = h => { if (st.y + h > BOTTOM) newPage(); };
+  const section = (title, sub) => {
+    ensure(70);
+    const w = pdf.text(title, L, st.y, {font: 'B', size: 13, color: PC.accent});
+    if (sub) {
+      pdf.text('|', L + w + 8, st.y - 0.5, {font: 'B', size: 13, color: PC.accent});
+      pdf.text(pdf.fit(sub, R - L - w - 26, 'I', 9), L + w + 20, st.y - 1, {font: 'I', size: 9, color: PC.muted});
+    }
+    st.y += 14;
+  };
+  // Tabla: cols = [{label: ['Línea 1', 'Línea 2'], w, align, shade}], rows = [[...]], total = [...]
+  const table = (cols, rows, total, o) => {
+    o = o || {};
+    const x0 = o.x || L, rowH = o.rowH || 19, size = o.size || 9.5;
+    const xs = []; let acc = x0; cols.forEach(c => { xs.push(acc); acc += c.w; });
+    const header = () => {
+      const hh = 28;
+      cols.forEach((c, i) => { if (c.shade) pdf.rect(xs[i], st.y, c.w, hh, PC.shade); });
+      cols.forEach((c, i) => {
+        const lines = c.label, cyy = st.y + (lines.length > 1 ? 12 : 17);
+        lines.forEach((t, j) => {
+          const tx = c.align === 'right' ? xs[i] + c.w - 6 : c.align === 'center' ? xs[i] + c.w / 2 : xs[i] + 6;
+          pdf.text(t, tx, cyy + j * 9, {font: j ? 'H' : 'B', size: 7.5, color: j ? PC.muted : PC.ink, align: c.align === 'right' ? 'right' : c.align === 'center' ? 'center' : 'left'});
+        });
+      });
+      pdf.line(x0, st.y + hh, acc, st.y + hh, PC.line, 0.6);
+      st.y += hh;
+    };
+    ensure(28 + rowH * Math.min(rows.length, 2) + (total ? 24 : 0));
+    header();
+    rows.forEach((r, ri) => {
+      if (st.y + rowH > BOTTOM) { newPage(); if (o.title) { pdf.text(o.title + ' (continuación)', x0, st.y, {font: 'B', size: 10, color: PC.accent}); st.y += 10; } header(); }
+      cols.forEach((c, i) => {
+        if (c.shade) pdf.rect(xs[i], st.y, c.w, rowH, [250, 250, 252]);
+        const v = r[i] == null ? '' : String(r[i]);
+        const t = pdf.fit(v, c.w - 12, c.bold ? 'B' : 'H', size);
+        const tx = c.align === 'right' ? xs[i] + c.w - 6 : c.align === 'center' ? xs[i] + c.w / 2 : xs[i] + 6;
+        pdf.text(t, tx, st.y + rowH / 2 + size * 0.35, {font: c.bold ? 'B' : 'H', size, color: c.color || PC.ink, align: c.align === 'right' ? 'right' : c.align === 'center' ? 'center' : 'left'});
+      });
+      st.y += rowH;
+      if (ri < rows.length - 1) pdf.line(x0, st.y, acc, st.y, PC.line, 0.4);
+    });
+    if (total) {
+      if (st.y + 24 > BOTTOM) { newPage(); header(); }
+      pdf.line(x0, st.y + 0.6, acc, st.y + 0.6, PC.accent, 1.4);
+      cols.forEach((c, i) => {
+        const v = total[i]; if (v == null || v === '') return;
+        const tx = c.align === 'right' ? xs[i] + c.w - 6 : c.align === 'center' ? xs[i] + c.w / 2 : xs[i] + 6;
+        pdf.text(pdf.fit(String(v), c.w - 10, 'B', 10.5), tx, st.y + 16, {font: 'B', size: 10.5, color: PC.accent, align: c.align === 'right' ? 'right' : c.align === 'center' ? 'center' : 'left'});
+      });
+      st.y += 24;
+    } else {
+      pdf.line(x0, st.y + 0.6, acc, st.y + 0.6, PC.accent, 1.2);
+      st.y += 4;
+    }
+    st.y += 26;
+  };
+  const note = t => { ensure(30); pdf.wrap(t, R - L, 'I', 9).forEach(l => { pdf.text(l, L, st.y, {font: 'I', size: 9, color: PC.muted}); st.y += 12; }); st.y += 16; };
+  const agingCols = [
+    {label: ['0 a 29 días', 'de atraso'], w: 64, align: 'right', shade: true},
+    {label: ['30 a 59 días', 'de atraso'], w: 64, align: 'right', shade: true},
+    {label: ['60 a 89 días', 'de atraso'], w: 64, align: 'right', shade: true},
+    {label: ['90 o más días', 'de atraso'], w: 64, align: 'right', shade: true},
+  ];
+
+  // 1. Deuda por persona
+  section(pid ? 'Deuda de ' + who : 'Deuda por persona', pid ? 'Lo que te debe por las compras en las que participa.' : 'Lo que te debe cada persona por compras hechas con tus tarjetas.');
+  if (d.perPerson.length) {
+    table([
+      {label: ['Persona'], w: 128, bold: false},
+      {label: ['Compras', 'activas'], w: 52, align: 'center'},
+      {label: ['Total', 'pendiente'], w: 75, align: 'right'},
+      ...agingCols,
+    ], d.perPerson.map(p => [p.name, p.active, money(p.total), ...p.b.map(amt)]),
+    ['Total', '', money(d.total), ...d.buckets.map(amt)], {title: 'Deuda por persona'});
+  } else note(pid ? `${who} no tiene cuotas pendientes contigo.` : 'Nadie te debe cuotas pendientes.');
+
+  // 2. Cuotas atrasadas
+  if (d.late.length) {
+    section('Cuotas atrasadas', 'Meses con pagos pendientes. Cada mes vence su último día.');
+    table([
+      {label: ['Persona'], w: 150},
+      {label: ['Mes de', 'la cuota'], w: 95},
+      {label: ['Venció', 'el'], w: 80, align: 'center'},
+      {label: ['Días de', 'atraso'], w: 80, align: 'center', shade: true},
+      {label: ['Monto', 'pendiente'], w: R - L - 405, align: 'right'},
+    ], d.late.map(x => [personName(x.id), cap(mLabel(x.month)), fmtD(x.due), String(x.days), money(x.amount)]),
+    ['Total', '', '', '', money(d.late.reduce((s, x) => s + x.amount, 0))], {title: 'Cuotas atrasadas'});
+  }
+
+  // 3. Detalle por compra
+  if (d.detail.length) {
+    section('Detalle por compra', `Cuotas que faltan por cobrar desde ${mLabel(d.M)}.`);
+    table([
+      {label: ['Compra'], w: 132},
+      {label: ['Persona'], w: 88},
+      {label: ['Tarjeta'], w: 86},
+      {label: ['Cuota', 'actual'], w: 70, align: 'center'},
+      {label: ['Valor', 'cuota'], w: 64, align: 'right'},
+      {label: ['Por', 'cobrar'], w: R - L - 440, align: 'right', shade: true},
+    ], d.detail.map(x => [x.desc, x.who, x.card, x.cuota, money(x.valor), money(x.rest)]),
+    ['Total', '', '', '', '', money(d.detail.reduce((s, x) => s + x.rest, 0))], {title: 'Detalle por compra'});
+  }
+
+  // 4. Tarjetas y pagos recibidos (bloque gris, dos tablas lado a lado)
+  const leftRows = d.cards.map(c => pid ? [c.name, money(c.others)] : [c.name, money(c.total), amt(c.others)]);
+  const rightRows = d.pays.map(p => pid ? [fmtDate(p.date) || '-', cap(mLabel(p.month)), money(p.amount)] : [p.who, fmtDate(p.date) || '-', money(p.amount)]);
+  if (leftRows.length || rightRows.length) {
+    const rows = Math.max(leftRows.length, rightRows.length, 1);
+    const blockH = 74 + 28 + rows * 18 + 26;
+    if (st.y + blockH > BOTTOM) newPage();
+    const top = st.y - 8;
+    pdf.rect(0, top, W, Math.min(blockH + 8, BOTTOM - top + 18), PC.grey);
+    pdf.text(pid ? 'Cuotas y pagos' : 'Tarjetas y pagos', L, st.y + 18, {size: 17, color: [70, 74, 92]});
+    st.y += 46;
+    const colW = (R - L - 24) / 2, y0 = st.y;
+    const mini = (x, title, sub, cols, rws, tot) => {
+      st.y = y0;
+      pdf.text(title, x, st.y, {font: 'B', size: 12, color: PC.accent});
+      pdf.wrap(sub, colW, 'I', 8.5).slice(0, 2).forEach((l, i) => pdf.text(l, x, st.y + 13 + i * 10.5, {font: 'I', size: 8.5, color: PC.muted}));
+      st.y += 34;
+      if (!rws.length) { pdf.text('Sin registros.', x, st.y + 12, {size: 9, color: PC.muted}); return; }
+      table(cols, rws, tot, {x, rowH: 18, size: 9});
+    };
+    mini(L, pid ? `Su parte de ${mon} por tarjeta` : `Cobro de ${mon} por tarjeta`,
+      pid ? 'Cuánto de lo que cobran tus tarjetas este mes le corresponde.' : 'Lo que cobran tus tarjetas este mes y cuánto te deben de eso.',
+      pid ? [{label: ['Tarjeta'], w: colW - 90}, {label: ['Su parte'], w: 90, align: 'right'}]
+        : [{label: ['Tarjeta'], w: colW - 160}, {label: ['Cobro', 'del mes'], w: 80, align: 'right'}, {label: ['Te', 'deben'], w: 80, align: 'right'}],
+      leftRows, leftRows.length ? (pid ? ['Total', money(d.cards.reduce((s, c) => s + c.others, 0))] : ['Total', money(d.cards.reduce((s, c) => s + c.total, 0)), amt(d.cards.reduce((s, c) => s + c.others, 0))]) : null);
+    const yl = st.y;
+    mini(L + colW + 24, 'Pagos recibidos', pid ? 'Últimos pagos que registraste.' : 'Últimos pagos que registraste de cada persona.',
+      pid ? [{label: ['Fecha'], w: 72}, {label: ['Mes pagado'], w: colW - 152}, {label: ['Monto'], w: 80, align: 'right'}]
+        : [{label: ['Persona'], w: colW - 152}, {label: ['Fecha'], w: 72}, {label: ['Monto'], w: 80, align: 'right'}],
+      rightRows, null);
+    st.y = Math.max(yl, st.y);
+  }
+
+  // Pie de página en todas las hojas
+  const N = pdf.pages.length;
+  pdf.pages.forEach((ops, i) => {
+    pdf.ops = ops;
+    pdf.line(L, H - 66, R, H - 66, PC.line, 0.6);
+    const foot = 'Este informe lo generó la app Cuotas Compartidas con las compras, cuotas y pagos registrados en tu cuenta. No es un documento oficial ni reemplaza el Informe de Deudas de la CMF. Los días de atraso se cuentan desde el último día del mes de cada cuota.';
+    pdf.wrap(foot, 360, 'I', 7).slice(0, 4).forEach((l, j) => pdf.text(l, L, H - 53 + j * 9, {font: 'I', size: 7, color: PC.muted}));
+    pdf.text('Cuotas Compartidas', R, H - 53, {font: 'B', size: 7.5, color: PC.accent, align: 'right'});
+    pdf.text(fmtD(new Date()), R, H - 44, {size: 7, color: PC.muted, align: 'right'});
+    pdf.text(`página ${i + 1}/${N}`, W / 2, H - 18, {size: 8, color: PC.ink, align: 'center'});
+  });
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const slug = s => pdfClean(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const name = `informe-deudas${pid ? '-' + (slug(who) || 'persona') : ''}-${todayISO()}.pdf`;
+  return {bytes: pdf.output({title: 'Informe de Deudas' + (pid ? ' - ' + who : ''), author: account, date: stamp}), name, pages: N};
+}
+
+/* ---------- entregar el PDF ---------- */
+function deliverPdf(bytes, name) {
+  if (IN_APP) {
+    const b = window.CuotasAndroid;
+    if (b && typeof b.savePdf === 'function') {
+      let ok = false;
+      try { ok = !!b.savePdf(btoa(bytes), name); } catch (e) {}
+      toast(ok ? 'Informe guardado en Descargas › Cuotas.' : 'No se pudo guardar el PDF en este teléfono. Prueba desde Chrome.');
+    } else toast('Actualiza la app de Android a la versión 1.2 para descargar el informe en PDF.');
+    return;
+  }
+  try {
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i) & 255;
+    const url = URL.createObjectURL(new Blob([arr], {type: 'application/pdf'}));
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('Informe descargado: ' + name);
+  } catch (e) { toast('No se pudo descargar el informe en este navegador.'); }
+}
+function openReport(pid) {
+  const ps = people();
+  openModal(`<form id="rpf" class="form" novalidate>
+    <div class="sheet-head" style="margin-bottom:0"><h2 id="sheet-title">Informe de deudas en PDF</h2><button type="button" class="icon-btn" data-close aria-label="Cerrar">×</button></div>
+    <label class="field"><span>¿De quién?</span>
+      <select id="rp-who"><option value="">Todas las personas</option>${ps.map(p => `<option value="${esc(p.id)}" ${pid === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+      <small>Elige una persona para mandarle su propio informe.</small></label>
+    <p class="hint">Incluye la deuda total al día de hoy, los atrasos por días (0 a 29, 30 a 59, 60 a 89 y 90 o más), el detalle de cada compra, el cobro de tus tarjetas este mes y los últimos pagos recibidos.</p>
+    <div class="sheet-foot"><span class="spacer"></span><button type="button" class="btn ghost" data-close>Cancelar</button><button type="submit" class="btn primary">Descargar PDF</button></div>
+  </form>`);
+  $('#rpf').addEventListener('submit', e => {
+    e.preventDefault();
+    const who = $('#rp-who').value;
+    let r;
+    try { r = buildReport(who); } catch (err) { toast('No se pudo crear el informe. Vuelve a intentarlo.'); return; }
+    closeModal();
+    deliverPdf(r.bytes, r.name);
+  });
+}
+
 /* ================= modal ================= */
 let lastFocus = null;
 function openModal(html) {
@@ -1667,7 +2115,7 @@ function openPurchase(id) {
     </div>
   </form>`);
   bindPurchase();
-  setTimeout(() => { const d = $('#f-desc'); if (d && !p) d.focus(); }, 40);
+  { const d = $('#f-desc'); if (d && !p) d.focus(); }
 }
 function bindPurchase() {
   const total = $('#f-total'), n = $('#f-n'), cuota = $('#f-cuota'), card = $('#f-card'), date = $('#f-date');
@@ -1867,7 +2315,7 @@ function openPayment(pid, month) {
     toast(`Pago de ${who} por ${money(amount)} guardado en ${mLabel(mon)}`, {label: 'Deshacer', fn: () => remove('payments', id)});
   });
   refresh();
-  setTimeout(() => { amt.focus(); amt.select(); }, 40);
+  amt.focus(); amt.select();
 }
 
 /* ================= toast ================= */
@@ -1919,6 +2367,7 @@ document.addEventListener('click', e => {
     case 'reload': location.reload(); break;
     case 'install': installApp(); break;
     case 'check-update': checkUpdate(); break;
+    case 'report': openReport(id || ''); break;
     case 'install-later': try { localStorage.setItem(INSTALL_KEY, '1'); } catch (e) {} render(); break;
     case 'export': exportData(); break;
     case 'import': { const f = $('#import-file'); if (f) { f.value = ''; f.click(); } break; }
