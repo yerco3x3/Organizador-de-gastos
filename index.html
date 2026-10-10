@@ -432,6 +432,9 @@ code{font-family:var(--f-num);font-size:.92em;background:var(--surface-2);paddin
 @media (max-width:640px){.brand .sync{margin-left:auto}}
 @media (max-width:400px){.brand .sync span{display:none}.brand .sync{padding:6px}}
 .sync-line{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted)}
+.app-pass{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:14px}
+.app-pass h3{font-size:15px;font-weight:700}
+.app-pass p{color:var(--muted);font-size:13.5px}
 .sync-line .sync{margin:0;padding:4px}
 .sync-line .sync span{display:none}
 
@@ -561,7 +564,10 @@ const authUI = {mode: 'login', email: ''};
 let cloudErr = '';
 let online = navigator.onLine !== false;
 let installEvt = null;
-const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+// La app de Android (APK) agrega "CuotasApp/" al navegador interno y un puente para compartir
+const IN_APP = /\bCuotasApp\//.test(navigator.userAgent || '');
+const bridge = () => (window.CuotasAndroid && typeof window.CuotasAndroid.share === 'function') ? window.CuotasAndroid : null;
+const isStandalone = () => IN_APP || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const INSTALL_KEY = 'cuotas-instalar-oculto';
 const cloud = () => backend === 'cloud' && !!(FB.db && FB.user);
 function fbConfig() {
@@ -811,6 +817,7 @@ function commitAll(prev) {
 /* ---------- respaldo ---------- */
 function exportData() {
   const payload = JSON.stringify({app: 'cuotas-compartidas', version: 1, exportado: new Date().toISOString(), datos: S}, null, 2);
+  if (bridge()) { try { bridge().share(payload); toast('Elige dónde guardar el respaldo: Drive, correo o WhatsApp.'); return; } catch (e) {} }
   try {
     const blob = new Blob([payload], {type: 'application/json'});
     const url = URL.createObjectURL(blob);
@@ -1037,8 +1044,9 @@ function viewAuth() {
         <p>Tus compras se guardan en tu base de datos de Firebase y las ves en el celular y en el computador. Solo tu cuenta puede verlas.</p>
       </div>
       ${asFile ? '<p class="slip-note">Estás abriendo la página como archivo. Para iniciar sesión, ábrela desde su dirección de GitHub Pages (https://tu-usuario.github.io/…).</p>' : ''}
-      <button type="button" class="btn wide" data-act="auth-google">Continuar con Google</button>
-      <div class="or" role="separator"><span>o con tu correo</span></div>
+      ${IN_APP ? `<p class="slip-note">En la app de Android se entra con correo y contraseña. Si usas tu cuenta de Google, primero crea una contraseña en la página web desde Chrome: Personas → Tu cuenta → Contraseña para la app.</p>`
+        : `<button type="button" class="btn wide" data-act="auth-google">Continuar con Google</button>
+      <div class="or" role="separator"><span>o con tu correo</span></div>`}
       <form id="auth-form" class="form" novalidate>
         <label class="field"><span>Correo</span><input id="au-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" value="${esc(authUI.email)}" placeholder="tucorreo@gmail.com"></label>
         <label class="field"><span>Contraseña${create ? ' (mínimo 6 caracteres)' : ''}</span><input id="au-pass" type="password" autocomplete="${create ? 'new-password' : 'current-password'}" minlength="6"></label>
@@ -1297,20 +1305,15 @@ function viewAjustes() {
         <p>Entraste como <strong>${esc(who)}</strong>. Tus compras, personas y pagos se guardan en Firebase (proyecto <code>${esc(FB.cfg.projectId)}</code>) y solo tu cuenta puede verlos. Si te quedas sin internet, la página sigue funcionando y sube los cambios al reconectar.</p></div>
       <p class="sync-line"><span class="${$('#sync') ? $('#sync').className : 'sync'}"><i aria-hidden="true"></i></span>${esc(online ? (cloudErr ? 'Hubo un error al guardar' : (FB.pending.size ? 'Guardando cambios…' : 'Todo está guardado en la nube')) : 'Sin conexión: los cambios se subirán al reconectar')}</p>
       <div class="actions">
-        <button type="button" class="btn" data-act="export">Descargar respaldo</button>
-        <button type="button" class="btn" data-act="import">Cargar respaldo</button>
+        ${backupButtons()}
         <button type="button" class="btn ghost danger" data-act="sign-out">Cerrar sesión</button>
-        <input type="file" id="import-file" accept="application/json,.json" hidden>
-      </div>`;
+      </div>
+      ${appPasswordBlock()}`;
   } else {
     storagePanel = `<div class="panel-head"><h2>Dónde se guardan tus datos</h2>
         <p>Tus compras, personas y pagos se guardan solo en este navegador, en este dispositivo: no se suben a internet ni a GitHub. Para pasarlos a otro dispositivo, descarga un respaldo aquí y cárgalo allá.</p>
         <p>Para guardarlos en la nube y verlos en todos tus dispositivos, conecta Firebase agregando el archivo <code>firebase-config.js</code> junto a esta página.</p></div>
-      <div class="actions">
-        <button type="button" class="btn" data-act="export">Descargar respaldo</button>
-        <button type="button" class="btn" data-act="import">Cargar respaldo</button>
-        <input type="file" id="import-file" accept="application/json,.json" hidden>
-      </div>`;
+      <div class="actions">${backupButtons()}</div>`;
   }
   return `<div class="settings">
     <section class="panel">
@@ -1330,7 +1333,55 @@ function viewAjustes() {
     ${installPanel()}
   </div>`;
 }
+function backupButtons() {
+  if (bridge()) return '<button type="button" class="btn" data-act="export">Compartir respaldo</button>';
+  return `<button type="button" class="btn" data-act="export">Descargar respaldo</button>
+        <button type="button" class="btn" data-act="import">Cargar respaldo</button>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>`;
+}
+/* Contraseña para entrar en la app de Android con una cuenta creada con Google */
+function appPasswordBlock() {
+  if (!cloud() || !FB.user.email) return '';
+  const prov = (FB.user.providerData || []).map(p => p && p.providerId);
+  if (prov.includes('password')) {
+    if (IN_APP || !prov.includes('google.com')) return '';
+    return '<p class="sync-line">Tu cuenta ya tiene contraseña: puedes entrar en la app de Android con tu correo y esa contraseña.</p>';
+  }
+  return `<div class="app-pass">
+      <h3>Contraseña para la app de Android</h3>
+      <p>La app de Android se entra con correo y contraseña. Crea una aquí para usar esta misma cuenta (${esc(FB.user.email)}) y ver los mismos datos.</p>
+      <form class="add-row" id="link-pass" autocomplete="off" novalidate>
+        <input id="lp-pass" type="password" autocomplete="new-password" minlength="6" placeholder="Contraseña nueva (mínimo 6)" aria-label="Contraseña nueva para la app">
+        <button class="btn" type="submit">Crear contraseña</button>
+      </form>
+      <p class="form-err" id="lp-err" role="alert"></p>
+    </div>`;
+}
+async function linkPassword() {
+  const inp = $('#lp-pass'), err = $('#lp-err');
+  const pass = inp ? inp.value : '';
+  if (err) err.textContent = '';
+  if (pass.length < 6) { if (err) err.textContent = 'La contraseña debe tener al menos 6 caracteres.'; if (inp) inp.focus(); return; }
+  const btn = $('#link-pass button'); if (btn) btn.disabled = true;
+  try {
+    const cred = FB.A.EmailAuthProvider.credential(FB.user.email, pass);
+    const res = await FB.A.linkWithCredential(FB.user, cred);
+    if (res && res.user) FB.user = res.user;
+    toast('Listo. En la app de Android entra con tu correo y esta contraseña.');
+    render();
+  } catch (e) {
+    const code = e && e.code ? String(e.code) : '';
+    const msg = code === 'auth/requires-recent-login' ? 'Por seguridad, cierra sesión, vuelve a entrar con Google y créala de nuevo.'
+      : code === 'auth/provider-already-linked' ? 'Tu cuenta ya tiene contraseña.'
+      : (code === 'auth/email-already-in-use' || code === 'auth/credential-already-in-use') ? 'Ya existe otra cuenta con este correo y contraseña. En la app, entra con esa.'
+      : authMsg(e);
+    if (err) err.textContent = msg;
+    if (btn) btn.disabled = false;
+  }
+}
 function installPanel() {
+  if (IN_APP) return `<section class="panel"><div class="panel-head"><h2>App de Android</h2>
+    <p>Estás usando la app de Android. Muestra siempre la versión más reciente de tu página, así que los cambios que subas a GitHub aparecen aquí sin reinstalar nada.</p></div></section>`;
   if (isStandalone()) return `<section class="panel"><div class="panel-head"><h2>App en tu celular</h2>
     <p>Estás usando la app instalada. Se actualiza sola cuando subes una versión nueva a GitHub.</p></div></section>`;
   return `<section class="panel"><div class="panel-head"><h2>Instalar como app</h2>
@@ -1432,14 +1483,16 @@ function copyMessage(pid) {
       else fallback();
     } catch (e) { fallback(); }
   };
+  // En la app de Android abre el menú de compartir del teléfono
+  if (bridge()) { try { bridge().share(text); return; } catch (e) {} }
   // En el celular abre el menú de compartir (WhatsApp, Telegram, correo…)
-  if (canShare()) {
+  if (typeof navigator.share === 'function' && matchMedia('(pointer:coarse)').matches) {
     navigator.share({text}).catch(e => { if (!e || e.name !== 'AbortError') copy(); });
     return;
   }
   copy();
 }
-const canShare = () => typeof navigator.share === 'function' && matchMedia('(pointer:coarse)').matches;
+const canShare = () => !!bridge() || (typeof navigator.share === 'function' && matchMedia('(pointer:coarse)').matches);
 
 /* ================= modal ================= */
 let lastFocus = null;
@@ -1804,6 +1857,7 @@ document.addEventListener('change', e => {
 document.addEventListener('submit', e => {
   const f = e.target;
   if (f.id === 'auth-form') { e.preventDefault(); signInEmail(); return; }
+  if (f.id === 'link-pass') { e.preventDefault(); linkPassword(); return; }
   if (f.id === 'add-person') {
     e.preventDefault();
     const inp = $('#ap-name'); const name = inp.value.trim();
