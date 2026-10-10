@@ -328,10 +328,13 @@ table.proj{border-collapse:separate;border-spacing:0;min-width:100%;font-size:13
 .panel h2{font-size:17px;font-weight:700}
 .panel-head p{color:var(--muted);font-size:13.5px;margin-top:4px}
 .set-list{display:grid}
-.set-list li{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.set-list li{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.set-end{display:inline-flex;align-items:center;gap:4px;margin-left:auto;flex:none;white-space:nowrap}
+.set-end .btn{padding-inline:8px}
+.set-list .cierre{order:9;flex-basis:100%;padding-left:34px}
 .set-list li:first-child{border-top:0}
 .set-list small{color:var(--muted);font-size:12.5px;white-space:nowrap}
-input.inline{flex:1 1 140px;min-width:0;border:1px solid transparent;background:transparent;border-radius:6px;padding:6px 8px;font-weight:600;font-size:16px}
+input.inline{flex:1 1 0;min-width:56px;border:1px solid transparent;background:transparent;border-radius:6px;padding:6px 8px;font-weight:600;font-size:16px}
 input.inline:hover{border-color:var(--line)}
 input.inline:focus{border-color:var(--accent);background:var(--bg);outline:none}
 .cierre{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
@@ -1367,16 +1370,16 @@ function viewAjustes() {
       ${dotHTML(p.id)}
       <input class="inline" id="rn-p-${esc(p.id)}" data-rename="people" data-id="${esc(p.id)}" value="${esc(p.name)}" aria-label="Nombre de ${esc(p.name)}" autocomplete="off">
       ${p.example ? '<span class="ex">ejemplo</span>' : ''}
-      <small>${useP(p.id)} ${plural(useP(p.id), 'compra', 'compras')}</small>
-      <button type="button" class="btn small ghost danger" data-act="del-person" data-id="${esc(p.id)}">Eliminar</button>
+      <span class="set-end"><small>${useP(p.id)} ${plural(useP(p.id), 'compra', 'compras')}</small>
+      <button type="button" class="btn small ghost danger" data-act="del-person" data-id="${esc(p.id)}">Eliminar</button></span>
     </li>`).join('') : '<li class="empty-line">Todavía no agregas personas.</li>';
   const cardList = cs.length ? cs.map(c => `<li>
       <span class="cardchip" style="--c:${safeColor(c.color)}" aria-hidden="true"></span>
       <input class="inline" id="rn-c-${esc(c.id)}" data-rename="cards" data-id="${esc(c.id)}" value="${esc(c.name)}" aria-label="Nombre de la tarjeta ${esc(c.name)}" autocomplete="off">
       ${c.example ? '<span class="ex">ejemplo</span>' : ''}
       <label class="cierre">Cierre día <input type="number" min="1" max="31" inputmode="numeric" id="ci-${esc(c.id)}" data-cierre="1" data-id="${esc(c.id)}" value="${c.cierre ? Math.round(num(c.cierre)) : ''}" placeholder="—"></label>
-      <small>${useC(c.id)} ${plural(useC(c.id), 'compra', 'compras')}</small>
-      <button type="button" class="btn small ghost danger" data-act="del-card" data-id="${esc(c.id)}">Eliminar</button>
+      <span class="set-end"><small>${useC(c.id)} ${plural(useC(c.id), 'compra', 'compras')}</small>
+      <button type="button" class="btn small ghost danger" data-act="del-card" data-id="${esc(c.id)}">Eliminar</button></span>
     </li>`).join('') : '<li class="empty-line">Todavía no agregas tarjetas.</li>';
   let storagePanel;
   if (cloud()) {
