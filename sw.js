@@ -5,7 +5,7 @@
  * - Las conexiones a la base de datos (Firestore, inicio de sesión) nunca pasan por aquí.
  * Cambia VERSION cuando subas una versión nueva de este archivo.
  */
-const VERSION = 'cuotas-v1';
+const VERSION = 'cuotas-v2';
 const SHELL = [
   './',
   './index.html',
@@ -24,6 +24,8 @@ self.addEventListener('install', event => {
     await Promise.all(SHELL.map(url => cache.add(new Request(url, { cache: 'reload' })).catch(() => {})));
     // Firebase se guarda la primera vez que la página lo usa (solo si tienes firebase-config.js)
   })());
+  // La versión nueva se activa de inmediato (la página se recarga sola una vez)
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
@@ -46,8 +48,12 @@ const isStatic = url =>
 async function networkFirst(request, fallbackUrl) {
   const cache = await caches.open(VERSION);
   try {
-    const response = await fetch(request);
-    if (response && response.ok) cache.put(request, response.clone());
+    // Siempre pregunta a GitHub si hay una versión nueva, sin usar la copia vieja que guarda el navegador
+    let response = await fetch(request.url, { cache: 'no-cache', credentials: 'same-origin' });
+    if (response.redirected) {
+      response = new Response(await response.blob(), { status: response.status, statusText: response.statusText, headers: response.headers });
+    }
+    if (response && response.ok) cache.put(request.url, response.clone());
     return response;
   } catch (err) {
     const cached = await cache.match(request, { ignoreSearch: true }) || (fallbackUrl && await cache.match(fallbackUrl));

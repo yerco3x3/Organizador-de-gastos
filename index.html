@@ -436,6 +436,7 @@ code{font-family:var(--f-num);font-size:.92em;background:var(--surface-2);paddin
 @media (max-width:400px){.brand .sync span{display:none}.brand .sync{padding:6px}}
 .sync-line{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted)}
 .app-pass{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:14px}
+.version-row{align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:12px}
 .app-pass h3{font-size:15px;font-weight:700}
 .app-pass p{color:var(--muted);font-size:13.5px}
 .sync-line .sync{margin:0;padding:4px}
@@ -571,6 +572,7 @@ let installEvt = null;
 const IN_APP = /\bCuotasApp\//.test(navigator.userAgent || '');
 const bridge = () => (window.CuotasAndroid && typeof window.CuotasAndroid.share === 'function') ? window.CuotasAndroid : null;
 const APP_PACKAGE = 'io.github.yerco3x3.cuotas';
+const PAGE_VERSION = '1.5';
 // Si Chrome abre la página con ?app-login=<código>, solo se usa para entrar con Google y volver a la app
 let appLoginNonce = null;
 const isStandalone = () => IN_APP || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -1463,14 +1465,16 @@ async function linkPassword() {
   }
 }
 function installPanel() {
+  const ver = `<div class="actions version-row"><span class="sync-line">Versión de la página: <strong>${PAGE_VERSION}</strong></span><button type="button" class="btn small" data-act="check-update">Buscar actualización</button></div>`;
   if (IN_APP) return `<section class="panel"><div class="panel-head"><h2>App de Android</h2>
-    <p>Estás usando la app de Android. Muestra siempre la versión más reciente de tu página, así que los cambios que subas a GitHub aparecen aquí sin reinstalar nada.</p></div></section>`;
+    <p>Estás usando la app de Android. Al abrirla revisa si subiste una versión nueva de la página a GitHub y la carga sola.</p></div>${ver}</section>`;
   if (isStandalone()) return `<section class="panel"><div class="panel-head"><h2>App en tu celular</h2>
-    <p>Estás usando la app instalada. Se actualiza sola cuando subes una versión nueva a GitHub.</p></div></section>`;
+    <p>Estás usando la app instalada. Se actualiza sola cuando subes una versión nueva a GitHub.</p></div>${ver}</section>`;
   return `<section class="panel"><div class="panel-head"><h2>Instalar como app</h2>
     <p>Instálala en tu celular para abrirla desde su ícono, a pantalla completa y aunque no tengas internet.</p></div>
     ${installEvt ? '<div class="actions"><button type="button" class="btn primary" data-act="install">Instalar app</button></div>'
       : '<ol class="install-steps"><li>Abre esta página en Chrome.</li><li>Toca el menú ⋮ (arriba a la derecha).</li><li>Elige “Instalar app” o “Agregar a la pantalla principal”.</li></ol>'}
+    ${ver}
   </section>`;
 }
 
@@ -1914,6 +1918,7 @@ document.addEventListener('click', e => {
     case 'migrate-no': migrate(false); break;
     case 'reload': location.reload(); break;
     case 'install': installApp(); break;
+    case 'check-update': checkUpdate(); break;
     case 'install-later': try { localStorage.setItem(INSTALL_KEY, '1'); } catch (e) {} render(); break;
     case 'export': exportData(); break;
     case 'import': { const f = $('#import-file'); if (f) { f.value = ''; f.click(); } break; }
@@ -1965,6 +1970,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#overl
 /* ================= app instalable ================= */
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; scheduleRender(); });
 window.addEventListener('appinstalled', () => { installEvt = null; toast('App instalada. Ya la tienes en tu pantalla de inicio.'); scheduleRender(); });
+async function checkUpdate() {
+  toast('Buscando una versión nueva…');
+  try {
+    const reg = navigator.serviceWorker ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg) await reg.update();
+  } catch (e) {}
+  setTimeout(() => location.reload(), 400);
+}
 async function installApp() {
   const ev = installEvt; if (!ev) return;
   installEvt = null;
