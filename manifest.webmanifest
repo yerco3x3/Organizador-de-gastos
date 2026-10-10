@@ -1,0 +1,41 @@
+{
+  "name": "Cuotas Compartidas",
+  "short_name": "Cuotas",
+  "description": "Organiza las compras de tus tarjetas de crédito, divídelas entre personas y ve cuánto te debe cada una y en qué mes termina de pagar.",
+  "lang": "es-CL",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F1F2F6",
+  "theme_color": "#F1F2F6",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nueva compra",
+      "short_name": "Nueva",
+      "description": "Registrar una compra con tarjeta",
+      "url": "./?accion=nueva",
+      "icons": [{ "src": "icons/atajo-nueva-96.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Proyección",
+      "short_name": "Proyección",
+      "description": "Ver cuánto te deben en los próximos meses",
+      "url": "./#proyeccion",
+      "icons": [{ "src": "icons/atajo-proyeccion-96.png", "sizes": "96x96", "type": "image/png" }]
+    }
+  ],
+  "screenshots": [
+    { "src": "screenshots/mes.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Cuánto te debe cada persona este mes" },
+    { "src": "screenshots/proyeccion.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Proyección de cuotas de los próximos 12 meses" },
+    { "src": "screenshots/escritorio.png", "sizes": "1440x900", "type": "image/png", "form_factor": "wide", "label": "Resumen del mes en el computador" }
+  ]
+}

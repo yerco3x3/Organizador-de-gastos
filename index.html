@@ -10,7 +10,8 @@
 <meta name="apple-mobile-web-app-title" content="Cuotas">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="format-detection" content="telephone=no">
-<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAACOElEQVR42u3dsVECQRSAYdmhCmvAEgy0AUOLsAIrsAKLMLQBAy1Ba7AOAxMDhNtd5va95fviuxGWn7fCzXCb3c37BexTLAHiQByIA3EgDsSBOBAH4kAcIA7EgTgQB+JAHIgDcSAOxAHiQByIA3EgDsSBOBAH4kAcIA7EgTgQB+JAHIgDcSAOxIE4QByIA3EgDsSBOBAH4mBa2yCP4/Pt2ovx19Xtx/DHsBl7jzdNRK6kKCO4gas0ZnLIIsUIKcowQqLEoYxEq+ejLDHiMDZyrWFRhj5sK4iDdHHYUzKup8mBOBAH4kAciANxIA7EgTgQB4gDcSAOxIE4EAfiQByIA3GAOBAH4kAciANxIA7EgTgQB4gDcSAOxIE4EAfiIJtt8MdXdR+Jqh9gfHj8Wn7w89Nu+cEvr9/LD76/uwy7+Cvdb6XhdzObby9y9G9VZVGVSFUWnYmscPsV2wrZ4uh5Wxw+t3lsHD23eWx0nmtyIA7EgTgQB+JAHBA7jp47ER0+t+qL8Kpze74Ij/klusnBv+JeW/nlwttJVmbOOBgYh20FcSAO8sWxwgbpHw6TA9sKZxWHnSXdSpYpn5UybCvMFYfhkWj1yvTPUBnNVrq2spcLLsHfTuUMn7MyEkwOUyT4OydKHPi0gjgQB+JAHCAOxIE4EAfiQByIA3EgDsQB4kAciANxIA7EgTgQB+JAHIgDxIE4EAfiQByIA3EgDsSBOEAciANxIA7EgTgQB+JAHIgDxIE4EAen9wMuqHULJtLUOQAAAABJRU5ErkJggg==">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="description" content="Organiza las compras de tus tarjetas de crédito, divídelas entre personas y ve cuánto te debe cada una y en qué mes termina de pagar sus cuotas.">
 <title>Cuotas Compartidas</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 20'%3E%3Crect x='1' y='1' width='26' height='18' rx='3.5' fill='%232C41C2'/%3E%3Crect x='5' y='12' width='4' height='3' rx='1' fill='white'/%3E%3Crect x='11' y='12' width='4' height='3' rx='1' fill='white' opacity='.7'/%3E%3Crect x='17' y='12' width='4' height='3' rx='1' fill='white' opacity='.4'/%3E%3C/svg%3E">
@@ -434,6 +435,11 @@ code{font-family:var(--f-num);font-size:.92em;background:var(--surface-2);paddin
 .sync-line .sync{margin:0;padding:4px}
 .sync-line .sync span{display:none}
 
+/* ---------- como app instalada ---------- */
+.tabs,.bottomnav,.btn,.chip,.icon-btn,.seg{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+@media (display-mode:standalone){body{overscroll-behavior-y:none}}
+.install-steps{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--muted);font-size:13.5px}
+
 /* ---------- pantallas táctiles: botones más fáciles de tocar ---------- */
 @media (pointer:coarse){
   .btn{min-height:44px}
@@ -554,6 +560,9 @@ const FB = {A: null, F: null, app: null, auth: null, db: null, user: null, unsub
 const authUI = {mode: 'login', email: ''};
 let cloudErr = '';
 let online = navigator.onLine !== false;
+let installEvt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const INSTALL_KEY = 'cuotas-instalar-oculto';
 const cloud = () => backend === 'cloud' && !!(FB.db && FB.user);
 function fbConfig() {
   const c = window.FIREBASE_CONFIG;
@@ -751,7 +760,7 @@ async function signOutNow() {
   try { await FB.A.signOut(FB.auth); } catch (e) {}
   // Borra la copia guardada en este dispositivo para que nadie más la vea
   try { await FB.F.terminate(FB.db); await FB.F.clearIndexedDbPersistence(FB.db); } catch (e) {}
-  location.reload();
+  location.replace(location.pathname);
 }
 const ui ={view: 'mes', month: todayKey(), filter: 'activas', fCard: '', fPerson: '', confirmClear: false};
 try { const v = localStorage.getItem(UIKEY); if (VIEWS.includes(v)) ui.view = v; } catch (e) {}
@@ -960,6 +969,7 @@ function render() {
   }
   view.dataset.authMode = '';
   if (backend === 'cloud' && FB.ready.size < COLS.length) { view.innerHTML = '<div class="loading"><i></i>Cargando tus cuotas desde Firebase…</div>'; return; }
+  if (pendingAction === 'nueva') { pendingAction = null; setTimeout(() => { if ($('#overlay').hidden) openPurchase(); }, 0); }
   if (ui.view === 'mes') view.innerHTML = viewMes();
   else if (ui.view === 'compras') view.innerHTML = viewCompras();
   else if (ui.view === 'proyeccion') view.innerHTML = viewProyeccion();
@@ -1003,6 +1013,11 @@ function renderNotice() {
     if (mig.n.cards) parts.push(mig.n.cards + ' ' + plural(mig.n.cards, 'tarjeta', 'tarjetas'));
     out.push(`<div class="notice"><p>Este navegador tiene <strong>${esc(parts.join(', '))}</strong> que guardaste antes de conectar Firebase. ¿Las subimos a tu cuenta?</p>
       <div class="actions"><button type="button" class="btn small primary" data-act="migrate-yes">Subir a mi cuenta</button><button type="button" class="btn small ghost" data-act="migrate-no">No, gracias</button></div></div>`);
+  }
+  let hideInstall = false; try { hideInstall = !!localStorage.getItem(INSTALL_KEY); } catch (e) {}
+  if (installEvt && !isStandalone() && !hideInstall && (backend === 'local' || backend === 'cloud') && !mig) {
+    out.push(`<div class="notice"><p><strong>Instala Cuotas en tu celular</strong> para abrirla desde su ícono, a pantalla completa y sin internet.</p>
+      <div class="actions"><button type="button" class="btn small primary" data-act="install">Instalar app</button><button type="button" class="btn small ghost" data-act="install-later">Ahora no</button></div></div>`);
   }
   if ((backend === 'local' || backend === 'cloud') && hasExamples()) {
     out.push(`<div class="notice"><p><strong>Estos son datos de ejemplo</strong> para que veas cómo funciona. Cuando quieras, bórralos y agrega tus propias compras.</p>
@@ -1149,7 +1164,7 @@ function slipHTML(p, pm, ar, m) {
     <div class="actions">
       ${pm.left > 0 ? `<button type="button" class="btn small ok" data-act="paid-full" data-id="${esc(p.id)}">Marcar pagado</button>` : ''}
       <button type="button" class="btn small" data-act="pay" data-id="${esc(p.id)}">${pm.left > 0 ? 'Pago parcial' : 'Registrar pago'}</button>
-      <button type="button" class="btn small ghost" data-act="copy" data-id="${esc(p.id)}">Copiar mensaje</button>
+      <button type="button" class="btn small ghost" data-act="copy" data-id="${esc(p.id)}">${canShare() ? 'Enviar mensaje' : 'Copiar mensaje'}</button>
     </div>
   </article>`;
 }
@@ -1312,14 +1327,36 @@ function viewAjustes() {
       ${storagePanel}
       ${hasExamples() ?`<div><button type="button" class="btn small ${ui.confirmClear ? 'confirm' : ''}" data-act="clear-examples">${ui.confirmClear ? 'Sí, borrar ejemplos' : 'Borrar datos de ejemplo'}</button></div>` : ''}
     </section>
+    ${installPanel()}
   </div>`;
+}
+function installPanel() {
+  if (isStandalone()) return `<section class="panel"><div class="panel-head"><h2>App en tu celular</h2>
+    <p>Estás usando la app instalada. Se actualiza sola cuando subes una versión nueva a GitHub.</p></div></section>`;
+  return `<section class="panel"><div class="panel-head"><h2>Instalar como app</h2>
+    <p>Instálala en tu celular para abrirla desde su ícono, a pantalla completa y aunque no tengas internet.</p></div>
+    ${installEvt ? '<div class="actions"><button type="button" class="btn primary" data-act="install">Instalar app</button></div>'
+      : '<ol class="install-steps"><li>Abre esta página en Chrome.</li><li>Toca el menú ⋮ (arriba a la derecha).</li><li>Elige “Instalar app” o “Agregar a la pantalla principal”.</li></ol>'}
+  </section>`;
 }
 
 /* ================= actions ================= */
-function setView(v) {
+function setView(v, fromHistory) {
   if (!VIEWS.includes(v)) return;
+  const prev = ui.view;
   ui.view = v;
   try { localStorage.setItem(UIKEY, v); } catch (e) {}
+  // Historial para el botón Atrás de Android: desde cualquier pestaña vuelve a Mes, y desde Mes sale de la app
+  if (!fromHistory && v !== prev) {
+    try {
+      const base = location.pathname + location.search;
+      if (v === 'mes') {
+        if (history.state && history.state.view && history.state.view !== 'mes') history.back();
+        else history.replaceState({view: 'mes', root: true}, '', base);
+      } else if (prev === 'mes') history.pushState({view: v}, '', '#' + v);
+      else history.replaceState({view: v}, '', '#' + v);
+    } catch (e) {}
+  }
   render();
   window.scrollTo({top: 0});
 }
@@ -1389,11 +1426,20 @@ function copyMessage(pid) {
       <div class="sheet-foot" style="margin-top:14px"><span class="spacer"></span><button type="button" class="btn primary" data-close>Listo</button></div>`);
     const ta = $('#copy-ta'); if (ta) { ta.focus(); ta.select(); }
   };
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast(`Mensaje para ${personName(pid)} copiado. Pégalo en WhatsApp o donde quieras.`), fallback);
-    else fallback();
-  } catch (e) { fallback(); }
+  const copy = () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast(`Mensaje para ${personName(pid)} copiado. Pégalo en WhatsApp o donde quieras.`), fallback);
+      else fallback();
+    } catch (e) { fallback(); }
+  };
+  // En el celular abre el menú de compartir (WhatsApp, Telegram, correo…)
+  if (canShare()) {
+    navigator.share({text}).catch(e => { if (!e || e.name !== 'AbortError') copy(); });
+    return;
+  }
+  copy();
 }
+const canShare = () => typeof navigator.share === 'function' && matchMedia('(pointer:coarse)').matches;
 
 /* ================= modal ================= */
 let lastFocus = null;
@@ -1403,9 +1449,13 @@ function openModal(html) {
   ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">${html}</div>`;
   ov.hidden = false;
   document.body.classList.add('modal-open');
+  try { if (!(history.state && history.state.modal)) history.pushState({modal: true, view: ui.view}, ''); } catch (e) {}
 }
-function closeModal() {
+function closeModal(fromHistory) {
   const ov = $('#overlay');
+  if (ov.hidden) return;
+  // Cerrar desde la página también retrocede el historial, para que Atrás no reabra el formulario
+  if (!fromHistory && history.state && history.state.modal) { try { history.back(); return; } catch (e) {} }
   ov.hidden = true; ov.innerHTML = '';
   document.body.classList.remove('modal-open');
   F = null; P = null;
@@ -1725,6 +1775,8 @@ document.addEventListener('click', e => {
     case 'migrate-yes': migrate(true); break;
     case 'migrate-no': migrate(false); break;
     case 'reload': location.reload(); break;
+    case 'install': installApp(); break;
+    case 'install-later': try { localStorage.setItem(INSTALL_KEY, '1'); } catch (e) {} render(); break;
     case 'export': exportData(); break;
     case 'import': { const f = $('#import-file'); if (f) { f.value = ''; f.click(); } break; }
   }
@@ -1770,6 +1822,48 @@ document.addEventListener('submit', e => {
   }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#overlay').hidden) closeModal(); });
+
+/* ================= app instalable ================= */
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; scheduleRender(); });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('App instalada. Ya la tienes en tu pantalla de inicio.'); scheduleRender(); });
+async function installApp() {
+  const ev = installEvt; if (!ev) return;
+  installEvt = null;
+  try { await ev.prompt(); await ev.userChoice; } catch (e) {}
+  render();
+}
+// Atajo "Nueva compra" del ícono: ?accion=nueva
+let pendingAction = null;
+try {
+  pendingAction = new URLSearchParams(location.search).get('accion');
+  if (location.search) history.replaceState(null, '', location.pathname + location.hash);
+} catch (e) {}
+// Botón Atrás de Android: cierra formularios y vuelve a Mes antes de salir
+try {
+  history.replaceState({view: 'mes', root: true}, '', location.pathname);
+  if (ui.view !== 'mes') history.pushState({view: ui.view}, '', '#' + ui.view);
+} catch (e) {}
+window.addEventListener('popstate', e => {
+  if (!$('#overlay').hidden) { closeModal(true); return; }
+  const h = (location.hash || '').slice(1);
+  const v = (e.state && e.state.view) || (VIEWS.includes(h) ? h : 'mes');
+  if (v !== ui.view) setView(v, true);
+});
+// Service worker: abrir sin internet y avisar cuando hay una versión nueva
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadController || reloading) return; reloading = true; location.reload(); });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const offer = w => toast('Hay una versión nueva de la app.', {label: 'Actualizar', fn: () => w.postMessage('skip-waiting')});
+    if (reg.waiting && hadController) offer(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      if (w) w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w); });
+    });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
 
 /* ================= boot ================= */
 window.addEventListener('online', () => { online = true; render(); });
